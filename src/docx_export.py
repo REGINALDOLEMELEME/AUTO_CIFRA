@@ -85,7 +85,7 @@ def export_aligned_chord_docx(arrangement: dict, output_path: Path, title: str) 
             lyric_p.paragraph_format.space_before = Pt(0)
             lyric_p.paragraph_format.space_after = Pt(6)
             lyric_r = lyric_p.add_run(lyric_line)
-            _set_run_font(lyric_r, name="Calibri", size_pt=11, bold=False)
+            _set_run_font(lyric_r, name="Consolas", size_pt=11, bold=False)
 
     document.save(str(output_path))
     return output_path

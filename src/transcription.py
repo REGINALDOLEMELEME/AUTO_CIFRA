@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 import json
 from pathlib import Path
 from typing import Any
@@ -13,6 +13,7 @@ class LyricSegment:
     start: float
     end: float
     text: str
+    words: list[dict[str, Any]] = field(default_factory=list)
 
 
 def transcribe_audio(
@@ -37,7 +38,7 @@ def transcribe_audio(
         str(normalized_audio),
         language=language,
         vad_filter=use_vad,
-        word_timestamps=False,
+        word_timestamps=True,
     )
 
     items: list[LyricSegment] = []
@@ -45,11 +46,26 @@ def transcribe_audio(
         text = (segment.text or "").strip()
         if not text:
             continue
+        words: list[dict[str, Any]] = []
+        for w in (getattr(segment, "words", None) or []):
+            wt = (getattr(w, "word", "") or "").strip()
+            if not wt:
+                continue
+            w_start = float(getattr(w, "start", segment.start))
+            w_end = float(getattr(w, "end", w_start))
+            words.append(
+                {
+                    "start": round(w_start, 3),
+                    "end": round(w_end, 3),
+                    "word": wt,
+                }
+            )
         items.append(
             LyricSegment(
                 start=round(float(segment.start), 3),
                 end=round(float(segment.end), 3),
                 text=text,
+                words=words,
             )
         )
 
