@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local runtime outputs
+data/input/*
+data/output/*
+data/tmp/*
+!data/input/.gitkeep
+!data/output/.gitkeep
+!data/tmp/.gitkeep
+
+# Local downloaded tools/binaries
+tools/
+
+# Logs
+*.log

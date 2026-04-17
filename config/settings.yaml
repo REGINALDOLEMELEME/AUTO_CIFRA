@@ -1,0 +1,12 @@
+﻿app:
+  language: pt
+  use_demucs: true
+  docx_style: spaced
+paths:
+  input_dir: data/input
+  output_dir: data/output
+  tmp_dir: data/tmp
+tools:
+  ffmpeg_required: true
+  sonic_annotator_required: true
+  chordino_required: true

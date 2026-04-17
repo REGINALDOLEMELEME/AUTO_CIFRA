@@ -1,0 +1,765 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AUTO_CIFRA Test Console</title>
+  <style>
+    :root {
+      --bg: #f4efe4;
+      --paper: #fffaf0;
+      --ink: #1f2a2e;
+      --muted: #5f6b6f;
+      --accent: #0e8a72;
+      --accent-2: #145a9c;
+      --danger: #b3261e;
+      --warn: #9b6a0b;
+      --ok: #0f5c47;
+      --border: #d9d2c3;
+      --shadow: 0 12px 40px rgba(31, 42, 46, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Trebuchet MS", "Gill Sans", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 15% 12%, rgba(14, 138, 114, 0.16), transparent 40%),
+        radial-gradient(circle at 85% 8%, rgba(20, 90, 156, 0.14), transparent 35%),
+        linear-gradient(120deg, #f4efe4 0%, #efe7d6 100%);
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+
+    .card {
+      width: min(980px, 100%);
+      background: var(--paper);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .head {
+      padding: 24px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(135deg, rgba(14, 138, 114, 0.09), rgba(20, 90, 156, 0.08));
+    }
+
+    .head h1 { margin: 0 0 6px; font-size: clamp(1.4rem, 2.5vw, 2rem); }
+    .head p { margin: 0; color: var(--muted); }
+
+    .content { padding: 20px; display: grid; gap: 16px; }
+
+    .row { display: grid; gap: 12px; grid-template-columns: 2fr 1fr 1fr; }
+    .row > div { min-width: 0; }
+    @media (max-width: 850px) { .row { grid-template-columns: 1fr; } }
+
+    label {
+      display: block;
+      font-weight: 700;
+      font-size: 0.84rem;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: #2c3a3f;
+      margin-bottom: 6px;
+    }
+
+    input[type="url"],
+    select {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--ink);
+      font-size: 0.95rem;
+    }
+
+    .dropzone {
+      border: 2px dashed #9ab7af;
+      border-radius: 14px;
+      padding: 24px;
+      text-align: center;
+      background: linear-gradient(180deg, #fff 0%, #f8f4ea 100%);
+      cursor: pointer;
+      transition: all 160ms ease;
+    }
+
+    .dropzone.dragover { border-color: var(--accent); background: #eefaf6; }
+    .dropzone strong { display: block; font-size: 1.05rem; margin-bottom: 4px; }
+    .dropzone small { color: var(--muted); }
+
+    .meta, .panel {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      background: #fff;
+    }
+
+    .meta { display: none; }
+    .meta.show { display: block; }
+
+    .meta-grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      font-size: 0.92rem;
+      color: #314247;
+      margin-top: 8px;
+    }
+
+    .steps { display: flex; gap: 8px; flex-wrap: wrap; }
+    .chip {
+      font-size: 0.8rem;
+      border: 1px solid #c8d5db;
+      border-radius: 999px;
+      padding: 5px 10px;
+      background: #f3f7fa;
+      color: #415158;
+    }
+    .chip.ok { border-color: #b9e0d1; background: #eaf8f2; color: var(--ok); }
+    .chip.warn { border-color: #e8d5a6; background: #fff6df; color: var(--warn); }
+    .quality-badge {
+      font-size: 0.82rem;
+      border: 1px solid #c8d5db;
+      border-radius: 999px;
+      padding: 6px 10px;
+      background: #f3f7fa;
+      color: #415158;
+      display: inline-block;
+      margin-top: 8px;
+    }
+    .quality-badge.ok { border-color: #b9e0d1; background: #eaf8f2; color: var(--ok); }
+    .quality-badge.warn { border-color: #e8d5a6; background: #fff6df; color: var(--warn); }
+
+    .buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+    button {
+      border: none;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 140ms ease;
+    }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-secondary { background: #e9f1f8; color: #0b4378; }
+
+    .status {
+      min-height: 24px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 0.92rem;
+      background: #f6f6f6;
+      border: 1px solid #ececec;
+      color: #2f3a3f;
+    }
+    .status.ok { background: #eaf8f2; border-color: #c5e9d9; color: var(--ok); }
+    .status.err { background: #fdeeee; border-color: #f7cccc; color: var(--danger); }
+
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 0.83rem;
+      line-height: 1.4;
+      font-family: Consolas, monospace;
+      max-height: 260px;
+      overflow: auto;
+      padding: 10px;
+      border-radius: 8px;
+      background: #f8fafb;
+      border: 1px solid #ebeff1;
+    }
+
+    .result-links {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+
+    .result-links a {
+      text-decoration: none;
+      font-size: 0.82rem;
+      padding: 6px 10px;
+      border: 1px solid #c8d5db;
+      border-radius: 999px;
+      background: #f3f7fa;
+      color: #2d4e5e;
+    }
+
+    .history-list {
+      margin: 0;
+      padding-left: 18px;
+      display: grid;
+      gap: 6px;
+      max-height: 180px;
+      overflow: auto;
+      font-size: 0.86rem;
+    }
+
+    .history-list a {
+      color: #0b4378;
+      text-decoration: none;
+    }
+
+    audio { width: 100%; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <section class="head">
+      <h1>AUTO_CIFRA Test Console</h1>
+      <p>Single page flow: upload audio, process lyrics, arrange chords, inspect full response JSON.</p>
+    </section>
+
+    <section class="content">
+      <div class="row">
+        <div>
+          <label for="apiUrl">API Base / Upload Endpoint</label>
+          <input id="apiUrl" type="url" value="http://127.0.0.1:8000/upload" />
+        </div>
+        <div>
+          <label for="language">Language</label>
+          <select id="language">
+            <option value="pt" selected>pt</option>
+            <option value="en">en</option>
+            <option value="es">es</option>
+          </select>
+        </div>
+        <div>
+          <label for="modelSize">Model Size</label>
+          <select id="modelSize">
+            <option value="small" selected>small</option>
+            <option value="base">base</option>
+            <option value="tiny">tiny</option>
+            <option value="medium">medium</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Upload audio file">
+        <strong>Drop audio file here</strong>
+        <small>or click to choose .mp3, .wav, .m4a, .flac</small>
+        <input id="fileInput" type="file" accept=".mp3,.wav,.m4a,.flac,audio/*" hidden />
+      </div>
+
+      <section id="meta" class="meta">
+        <label>Selected File</label>
+        <div class="meta-grid">
+          <div><strong>Name:</strong> <span id="fileName">-</span></div>
+          <div><strong>Size:</strong> <span id="fileSize">-</span></div>
+          <div><strong>Type:</strong> <span id="fileType">-</span></div>
+        </div>
+        <audio id="player" controls></audio>
+      </section>
+
+      <section class="panel">
+        <label>Pipeline Progress</label>
+        <div class="steps">
+          <span id="chipUpload" class="chip">Upload: pending</span>
+          <span id="chipProcess" class="chip">Process: pending</span>
+          <span id="chipArrange" class="chip">Arrange: pending</span>
+        </div>
+        <div id="qualityBadge" class="quality-badge">QUALITY: UNKNOWN</div>
+      </section>
+
+      <div class="buttons">
+        <button id="uploadBtn" class="btn-primary" disabled>Upload</button>
+        <button id="processBtn" class="btn-secondary" disabled>Process</button>
+        <button id="arrangeBtn" class="btn-secondary" disabled>Arrange</button>
+        <button id="runAllBtn" class="btn-primary" disabled>Run Full Pipeline</button>
+        <a id="downloadDocxBtn" class="btn-secondary" href="#" download style="pointer-events:none;opacity:.55;text-decoration:none;">Download Final DOCX</a>
+        <button id="clearBtn" class="btn-secondary" type="button">Clear</button>
+      </div>
+
+      <div id="status" class="status">Waiting for file selection.</div>
+
+      <section class="panel">
+        <label>Last Response (full)</label>
+        <pre id="responseView">No response yet.</pre>
+        <div id="resultLinks" class="result-links"></div>
+      </section>
+
+      <section class="panel">
+        <label>Recent Outputs</label>
+        <div class="buttons">
+          <button id="refreshHistoryBtn" class="btn-secondary" type="button">Refresh History</button>
+        </div>
+        <ol id="historyList" class="history-list"></ol>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const allowed = ["mp3", "wav", "m4a", "flac"];
+
+    const apiUrl = document.getElementById("apiUrl");
+    const languageSel = document.getElementById("language");
+    const modelSizeSel = document.getElementById("modelSize");
+
+    const dropzone = document.getElementById("dropzone");
+    const fileInput = document.getElementById("fileInput");
+    const uploadBtn = document.getElementById("uploadBtn");
+    const processBtn = document.getElementById("processBtn");
+    const arrangeBtn = document.getElementById("arrangeBtn");
+    const runAllBtn = document.getElementById("runAllBtn");
+    const downloadDocxBtn = document.getElementById("downloadDocxBtn");
+    const clearBtn = document.getElementById("clearBtn");
+    const statusBox = document.getElementById("status");
+    const responseView = document.getElementById("responseView");
+    const resultLinks = document.getElementById("resultLinks");
+    const refreshHistoryBtn = document.getElementById("refreshHistoryBtn");
+    const historyList = document.getElementById("historyList");
+
+    const chipUpload = document.getElementById("chipUpload");
+    const chipProcess = document.getElementById("chipProcess");
+    const chipArrange = document.getElementById("chipArrange");
+    const qualityBadge = document.getElementById("qualityBadge");
+
+    const meta = document.getElementById("meta");
+    const fileName = document.getElementById("fileName");
+    const fileSize = document.getElementById("fileSize");
+    const fileType = document.getElementById("fileType");
+    const player = document.getElementById("player");
+
+    let selectedFile = null;
+    let uploadedFilename = "";
+    let currentObjectUrl = "";
+    let latestDocxPath = "";
+
+    function setChip(chip, text, mode = "") {
+      chip.className = "chip";
+      if (mode) chip.classList.add(mode);
+      chip.textContent = text;
+    }
+
+    function setStatus(message, mode = "") {
+      statusBox.className = "status";
+      if (mode) statusBox.classList.add(mode);
+      statusBox.textContent = message;
+    }
+
+    function setQualityBadge(text, mode = "") {
+      qualityBadge.className = "quality-badge";
+      if (mode) qualityBadge.classList.add(mode);
+      qualityBadge.textContent = text;
+    }
+
+    function setResponse(objOrText) {
+      if (typeof objOrText === "string") {
+        responseView.textContent = objOrText;
+        setDownloadDocx("");
+        return;
+      }
+      responseView.textContent = JSON.stringify(objOrText, null, 2);
+      renderResultLinks(objOrText);
+      setDownloadDocx(typeof objOrText.docx_path === "string" ? objOrText.docx_path : "");
+    }
+
+    function setDownloadDocx(docxPath) {
+      latestDocxPath = (docxPath || "").trim();
+      if (!latestDocxPath) {
+        downloadDocxBtn.href = "#";
+        downloadDocxBtn.style.pointerEvents = "none";
+        downloadDocxBtn.style.opacity = ".55";
+        downloadDocxBtn.removeAttribute("download");
+        return;
+      }
+      const link = toStaticLink(latestDocxPath);
+      downloadDocxBtn.href = link;
+      downloadDocxBtn.style.pointerEvents = "auto";
+      downloadDocxBtn.style.opacity = "1";
+      const name = latestDocxPath.split(/[/\\\\]/).pop() || "chords.docx";
+      downloadDocxBtn.setAttribute("download", name);
+    }
+
+    function renderResultLinks(payload) {
+      resultLinks.innerHTML = "";
+      if (!payload || typeof payload !== "object") return;
+      const candidateKeys = ["docx_path", "transcription_json", "chords_json", "arrangement_json"];
+      for (const key of candidateKeys) {
+        const relPath = payload[key];
+        if (!relPath || typeof relPath !== "string") continue;
+        const link = toStaticLink(relPath);
+        const a = document.createElement("a");
+        a.href = link;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.textContent = `Open ${key}`;
+        resultLinks.appendChild(a);
+      }
+    }
+
+    function toStaticLink(pathText) {
+      const raw = String(pathText || "");
+      const normalized = raw.replace(/\\/g, "/");
+      let webPath = normalized;
+
+      if (!/^data\//i.test(webPath)) {
+        const lower = webPath.toLowerCase();
+        const dataIdx = lower.indexOf("/data/");
+        if (dataIdx >= 0) {
+          webPath = webPath.slice(dataIdx + 1);
+        }
+      }
+
+      if (!/^data\//i.test(webPath)) {
+        return "#";
+      }
+
+      const encoded = webPath.split("/").map(encodeURIComponent).join("/");
+      return `http://localhost:5500/${encoded}`;
+    }
+
+    function formatBytes(bytes) {
+      if (!bytes && bytes !== 0) return "-";
+      const units = ["B", "KB", "MB", "GB"];
+      let value = bytes;
+      let unit = 0;
+      while (value >= 1024 && unit < units.length - 1) {
+        value /= 1024;
+        unit += 1;
+      }
+      return `${value.toFixed(unit === 0 ? 0 : 2)} ${units[unit]}`;
+    }
+
+    function buildRouteUrl(routeName) {
+      const endpointUrl = new URL(apiUrl.value.trim());
+      const cleanPath = endpointUrl.pathname.replace(/\/+$/, "");
+      if (cleanPath === "" || cleanPath === "/") {
+        endpointUrl.pathname = `/${routeName}`;
+      } else if (cleanPath.endsWith("/upload")) {
+        endpointUrl.pathname = cleanPath.replace(/\/upload$/, `/${routeName}`);
+      } else {
+        endpointUrl.pathname = `${cleanPath}/${routeName}`;
+      }
+      endpointUrl.search = "";
+      return endpointUrl;
+    }
+
+    function resetPreview() {
+      selectedFile = null;
+      uploadedFilename = "";
+      uploadBtn.disabled = true;
+      processBtn.disabled = true;
+      arrangeBtn.disabled = true;
+      runAllBtn.disabled = true;
+
+      setChip(chipUpload, "Upload: pending");
+      setChip(chipProcess, "Process: pending");
+      setChip(chipArrange, "Arrange: pending");
+      setQualityBadge("QUALITY: UNKNOWN");
+      setDownloadDocx("");
+
+      meta.classList.remove("show");
+      fileName.textContent = "-";
+      fileSize.textContent = "-";
+      fileType.textContent = "-";
+      if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
+      currentObjectUrl = "";
+      player.removeAttribute("src");
+      player.load();
+      setResponse("No response yet.");
+      resultLinks.innerHTML = "";
+    }
+
+    function isAudioAllowed(file) {
+      const ext = file.name.split(".").pop()?.toLowerCase();
+      return !!ext && allowed.includes(ext);
+    }
+
+    function selectFile(file) {
+      if (!file) return;
+      if (!isAudioAllowed(file)) {
+        resetPreview();
+        setStatus("Invalid format. Use .mp3, .wav, .m4a, or .flac.", "err");
+        return;
+      }
+
+      selectedFile = file;
+      uploadedFilename = "";
+      uploadBtn.disabled = false;
+      processBtn.disabled = true;
+      arrangeBtn.disabled = true;
+      runAllBtn.disabled = false;
+
+      setChip(chipUpload, "Upload: pending");
+      setChip(chipProcess, "Process: pending");
+      setChip(chipArrange, "Arrange: pending");
+
+      meta.classList.add("show");
+      fileName.textContent = file.name;
+      fileSize.textContent = formatBytes(file.size);
+      fileType.textContent = file.type || "unknown";
+
+      if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
+      currentObjectUrl = URL.createObjectURL(file);
+      player.src = currentObjectUrl;
+
+      setStatus("File ready. Start with Upload or Run Full Pipeline.", "ok");
+      setResponse("No response yet.");
+    }
+
+    async function uploadSong() {
+      if (!selectedFile) {
+        setStatus("Choose a file first.", "err");
+        return false;
+      }
+
+      const endpoint = apiUrl.value.trim();
+      if (!endpoint) {
+        setStatus("Provide an upload endpoint URL.", "err");
+        return false;
+      }
+
+      uploadBtn.disabled = true;
+      setStatus("Uploading file...", "");
+      setChip(chipUpload, "Upload: running", "warn");
+
+      const endpointUrl = buildRouteUrl("upload");
+      endpointUrl.searchParams.set("filename", selectedFile.name);
+
+      try {
+        const response = await fetch(endpointUrl.toString(), {
+          method: "POST",
+          headers: { "Content-Type": selectedFile.type || "application/octet-stream" },
+          body: selectedFile,
+        });
+
+        const raw = await response.text();
+        const parsed = tryJson(raw);
+        setResponse(parsed ?? raw);
+        updateQualityFromPayload(parsed);
+
+        if (!response.ok) {
+          setChip(chipUpload, `Upload: failed (${response.status})`);
+          setStatus(`Upload failed (${response.status}).`, "err");
+          return false;
+        }
+
+        uploadedFilename = selectedFile.name;
+        processBtn.disabled = false;
+        arrangeBtn.disabled = false;
+        setChip(chipUpload, "Upload: ok", "ok");
+        setStatus(`Upload success (${response.status}).`, "ok");
+        return true;
+      } catch (error) {
+        setChip(chipUpload, "Upload: failed");
+        setStatus(`Could not connect to endpoint. ${error.message}`, "err");
+        setResponse(String(error));
+        return false;
+      } finally {
+        uploadBtn.disabled = false;
+      }
+    }
+
+    async function processSong() {
+      if (!uploadedFilename) {
+        setStatus("Upload the file first.", "err");
+        return false;
+      }
+
+      processBtn.disabled = true;
+      setStatus("Processing lyrics...", "");
+      setChip(chipProcess, "Process: running", "warn");
+
+      const processUrl = buildRouteUrl("process");
+      processUrl.searchParams.set("filename", uploadedFilename);
+      processUrl.searchParams.set("language", languageSel.value);
+      processUrl.searchParams.set("model_size", modelSizeSel.value);
+
+      try {
+        const response = await fetch(processUrl.toString(), { method: "POST" });
+        const raw = await response.text();
+        const parsed = tryJson(raw);
+        setResponse(parsed ?? raw);
+        updateQualityFromPayload(parsed);
+
+        if (!response.ok) {
+          setChip(chipProcess, `Process: failed (${response.status})`);
+          setStatus(`Process failed (${response.status}).`, "err");
+          return false;
+        }
+
+        if (parsed && parsed.mode === "mock") {
+          setChip(chipProcess, "Process: ok (mock)", "warn");
+        } else {
+          setChip(chipProcess, "Process: ok", "ok");
+        }
+        setStatus(`Process success (${response.status}).`, "ok");
+        return true;
+      } catch (error) {
+        setChip(chipProcess, "Process: failed");
+        setStatus(`Could not connect to endpoint. ${error.message}`, "err");
+        setResponse(String(error));
+        return false;
+      } finally {
+        processBtn.disabled = false;
+      }
+    }
+
+    async function arrangeSong() {
+      if (!uploadedFilename) {
+        setStatus("Upload the file first.", "err");
+        return false;
+      }
+
+      arrangeBtn.disabled = true;
+      setStatus("Arranging chords and lyrics...", "");
+      setChip(chipArrange, "Arrange: running", "warn");
+
+      const arrangeUrl = buildRouteUrl("arrange");
+      arrangeUrl.searchParams.set("filename", uploadedFilename);
+      arrangeUrl.searchParams.set("language", languageSel.value);
+      arrangeUrl.searchParams.set("model_size", modelSizeSel.value);
+
+      try {
+        const response = await fetch(arrangeUrl.toString(), { method: "POST" });
+        const raw = await response.text();
+        const parsed = tryJson(raw);
+        setResponse(parsed ?? raw);
+        updateQualityFromPayload(parsed);
+
+        if (!response.ok) {
+          setChip(chipArrange, `Arrange: failed (${response.status})`);
+          setStatus(`Arrange failed (${response.status}).`, "err");
+          return false;
+        }
+
+        if (parsed && (parsed.transcription_mode === "mock" || parsed.chord_mode === "mock")) {
+          setChip(chipArrange, "Arrange: ok (mock)", "warn");
+        } else {
+          setChip(chipArrange, "Arrange: ok", "ok");
+        }
+        setStatus(`Arrange success (${response.status}).`, "ok");
+        return true;
+      } catch (error) {
+        setChip(chipArrange, "Arrange: failed");
+        setStatus(`Could not connect to endpoint. ${error.message}`, "err");
+        setResponse(String(error));
+        return false;
+      } finally {
+        arrangeBtn.disabled = false;
+      }
+    }
+
+    async function runAll() {
+      runAllBtn.disabled = true;
+      const uploadOk = await uploadSong();
+      if (!uploadOk) {
+        runAllBtn.disabled = false;
+        return;
+      }
+      const processOk = await processSong();
+      if (!processOk) {
+        runAllBtn.disabled = false;
+        return;
+      }
+      await arrangeSong();
+      runAllBtn.disabled = false;
+    }
+
+    function tryJson(raw) {
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return null;
+      }
+    }
+
+    function updateQualityFromPayload(payload) {
+      if (!payload || typeof payload !== "object") return;
+
+      const tMode = payload.transcription_mode || payload.mode || "";
+      const cMode = payload.chord_mode || "";
+
+      if (tMode && cMode) {
+        const tText = tMode === "real" ? "REAL LYRICS" : (tMode === "mock" ? "MOCK LYRICS" : `${tMode.toUpperCase()} LYRICS`);
+        const cText = cMode === "real" ? "VAMP CHORDS" : (cMode === "python" ? "PYTHON CHORDS" : `${cMode.toUpperCase()} CHORDS`);
+        const isBest = (tMode === "real" && cMode === "real");
+        const isGood = (tMode === "real" && cMode === "python");
+        setQualityBadge(`QUALITY: ${tText} + ${cText}`, (isBest || isGood) ? "ok" : "warn");
+        return;
+      }
+
+      if (payload.mode) {
+        const modeText = String(payload.mode).toUpperCase();
+        setQualityBadge(`QUALITY: ${modeText} LYRICS`, payload.mode === "real" ? "ok" : "warn");
+      }
+    }
+
+    async function refreshHistory() {
+      try {
+        const historyUrl = buildRouteUrl("history");
+        const response = await fetch(historyUrl.toString(), { method: "GET" });
+        const raw = await response.text();
+        const parsed = tryJson(raw);
+        if (!response.ok || !parsed || !Array.isArray(parsed.items)) {
+          historyList.innerHTML = "<li>Could not load history.</li>";
+          return;
+        }
+        historyList.innerHTML = "";
+        if (parsed.items.length === 0) {
+          historyList.innerHTML = "<li>No outputs yet.</li>";
+          return;
+        }
+        for (const item of parsed.items) {
+          const li = document.createElement("li");
+          const a = document.createElement("a");
+          a.href = toStaticLink(item.path);
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          a.textContent = `${item.name} (${item.kind})`;
+          li.appendChild(a);
+          historyList.appendChild(li);
+        }
+      } catch {
+        historyList.innerHTML = "<li>History unavailable.</li>";
+      }
+    }
+
+    dropzone.addEventListener("click", () => fileInput.click());
+    dropzone.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        fileInput.click();
+      }
+    });
+
+    fileInput.addEventListener("change", () => selectFile(fileInput.files?.[0]));
+
+    dropzone.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      dropzone.classList.add("dragover");
+    });
+
+    dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
+
+    dropzone.addEventListener("drop", (event) => {
+      event.preventDefault();
+      dropzone.classList.remove("dragover");
+      selectFile(event.dataTransfer?.files?.[0]);
+    });
+
+    clearBtn.addEventListener("click", () => {
+      fileInput.value = "";
+      resetPreview();
+      setStatus("Selection cleared.");
+    });
+
+    uploadBtn.addEventListener("click", uploadSong);
+    processBtn.addEventListener("click", processSong);
+    arrangeBtn.addEventListener("click", arrangeSong);
+    runAllBtn.addEventListener("click", runAll);
+    refreshHistoryBtn.addEventListener("click", refreshHistory);
+    refreshHistory();
+  </script>
+</body>
+</html>
