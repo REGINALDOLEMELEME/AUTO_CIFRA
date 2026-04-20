@@ -211,6 +211,9 @@
   let pollTimer = null;
   let startTs = null;
   let elapsedTimer = null;
+  let phaseStartTs = null;
+  let activePhaseStage = null;
+  let phaseAnimTimer = null;
 
   // Drag-drop
   ["dragover", "dragenter"].forEach((ev) => {
@@ -276,6 +279,7 @@
     startTs = Date.now();
     startElapsedTimer();
     startPolling();
+    startPhaseAnimation();
     loadHistory();
   }
 
@@ -324,6 +328,7 @@
     if (job.stage === "ready_for_review" || job.stage === "exported") {
       stopPolling();
       stopElapsedTimer();
+      stopPhaseAnimation();
       btnReview.classList.remove("disabled");
       btnReview.href = `/review/${job.id}`;
       btnExport.classList.remove("disabled");
@@ -331,6 +336,7 @@
     } else if (job.stage === "error") {
       stopPolling();
       stopElapsedTimer();
+      stopPhaseAnimation();
       showError(`Pipeline falhou: ${job.error || "erro desconhecido"}`);
     }
   }
@@ -349,9 +355,10 @@
       } else if (idx === currentIdx) {
         el.classList.add("active");
         el.classList.remove("done", "pending");
-        const local = localProgressFor(phaseStage, progress);
-        fill.style.width = `${Math.round(local * 100)}%`;
         statusEl.textContent = PT_LABELS[stage] || stage;
+        // Fill is now driven by the phase animation loop (time-based);
+        // see tickPhaseAnimation() below. We do NOT set width here so the
+        // smooth fill is not reset on every poll.
       } else {
         el.classList.add("pending");
         el.classList.remove("done", "active");
@@ -359,6 +366,37 @@
         statusEl.textContent = "pendente";
       }
     });
+
+    // Reset phase-start timestamp when the active stage changes
+    if (STAGE_ORDER.includes(stage) && stage !== activePhaseStage) {
+      activePhaseStage = stage;
+      phaseStartTs = Date.now();
+    }
+    if (stage === "ready_for_review" || stage === "exported" || stage === "error") {
+      activePhaseStage = null;
+    }
+  }
+
+  function startPhaseAnimation() {
+    if (phaseAnimTimer) clearInterval(phaseAnimTimer);
+    phaseAnimTimer = setInterval(tickPhaseAnimation, 200);
+  }
+  function stopPhaseAnimation() {
+    if (phaseAnimTimer) clearInterval(phaseAnimTimer);
+    phaseAnimTimer = null;
+  }
+  function tickPhaseAnimation() {
+    if (!activePhaseStage || !phaseStartTs) return;
+    const phaseEl = document.querySelector(`.phase[data-stage="${activePhaseStage}"]`);
+    if (!phaseEl) return;
+    const budget = parseFloat(phaseEl.dataset.budget) || 60;
+    const elapsedSec = (Date.now() - phaseStartTs) / 1000;
+    // Saturating exponential: fast at start, slows as it nears budget.
+    // At t = budget we reach ~86%, at 2*budget we reach ~98% — visually
+    // "working" without lying about completion.
+    const pct = (1 - Math.exp(-elapsedSec / (budget * 0.55))) * 98;
+    const fill = phaseEl.querySelector(".progress-fill");
+    if (fill) fill.style.width = `${Math.min(98, pct).toFixed(1)}%`;
   }
 
   // Map the global [0..1] progress to the per-phase [0..1] window
@@ -416,6 +454,9 @@
   function resetPipeline() {
     stopPolling();
     stopElapsedTimer();
+    stopPhaseAnimation();
+    phaseStartTs = null;
+    activePhaseStage = null;
     elapsed.textContent = "00:00";
     eta.textContent = "~11 min";
     overallFill.style.width = "0%";
