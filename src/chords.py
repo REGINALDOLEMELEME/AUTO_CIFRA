@@ -2,10 +2,128 @@ from __future__ import annotations
 
 import csv
 import json
-from pathlib import Path
-import subprocess
 import os
+import re
+import subprocess
+from pathlib import Path
 from typing import Any
+
+
+# -------- Vocabulary normalization (ADR-007) --------------------------------
+
+_ROOT = re.compile(r"^([A-Ga-g])([#b]?)")
+
+
+def _split_root(label: str) -> tuple[str, str] | None:
+    m = _ROOT.match(label)
+    if not m:
+        return None
+    root = m.group(1).upper() + (m.group(2) or "")
+    tail = label[m.end():]
+    return root, tail
+
+
+def _canonicalize_quality(tail: str) -> tuple[str, bool]:
+    """Return (quality_suffix, warn). Maps exotic Chordino tails to the
+    allowed vocabulary {maj, min, 5, 7, m7, maj7, m7b5, dim, sus4}."""
+    t = tail.strip().replace("Δ", "maj7").replace("°", "dim").replace("ø", "m7b5")
+    # Order matters — longest match first.
+    if re.search(r"maj7|M7", t):
+        return "maj7", False
+    if re.search(r"m7b5", t):
+        return "m7b5", False
+    if re.search(r"^min?7|^m7", t):
+        return "m7", False
+    if re.search(r"^min|^m(?![a-zA-Z])", t):
+        return "m", False
+    if re.search(r"^dim", t):
+        return "dim", False
+    if re.search(r"^aug|^\+", t):
+        return "", True
+    if re.search(r"^sus2", t):
+        return "", True
+    if re.search(r"^sus4?", t):
+        return "sus4", False
+    if re.search(r"^5($|[^0-9])", t):
+        return "5", False
+    if re.search(r"^7", t):
+        return "7", False
+    if re.search(r"^(9|11|13|add9|add11|add13)", t):
+        return "7", True
+    if t in {"", "maj", "M"}:
+        return "", False
+    return "", True
+
+
+def normalize_chord_label(label: str) -> tuple[str, bool]:
+    """Return (canonical_label, was_modified)."""
+    raw = label.strip()
+    if raw in {"", "N", "X", "-"}:
+        return "", False
+    if "/" in raw:
+        head, bass = raw.split("/", 1)
+        h, warn_h = normalize_chord_label(head)
+        b, warn_b = normalize_chord_label(bass)
+        if not h:
+            return "", True
+        if not b:
+            return h, warn_h or True
+        return f"{h}/{b}", warn_h or warn_b
+    parts = _split_root(raw)
+    if not parts:
+        return "", True
+    root, tail = parts
+    qual, warn = _canonicalize_quality(tail)
+    return f"{root}{qual}", warn
+
+
+def normalize_chord_vocabulary(chords: dict[str, Any]) -> dict[str, Any]:
+    warnings_accum: list[str] = list(chords.get("warning", "") and [chords["warning"]] or [])
+    seen_exotic: set[str] = set()
+    new_segments: list[dict[str, Any]] = []
+    for seg in chords.get("segments", []) or []:
+        raw_label = str(seg.get("chord") or "").strip()
+        canon, warn = normalize_chord_label(raw_label)
+        if not canon:
+            continue
+        if warn and raw_label not in seen_exotic:
+            seen_exotic.add(raw_label)
+            warnings_accum.append(f"chord simplified: {raw_label!r} -> {canon!r}")
+        new_segments.append({**seg, "chord": canon})
+    out = {**chords, "segments": new_segments}
+    out["warning"] = " | ".join([w for w in warnings_accum if w])
+    return out
+
+
+# -------- Beat smoothing ----------------------------------------------------
+
+
+def smooth_to_beats(chords: dict[str, Any], beats: dict[str, Any]) -> dict[str, Any]:
+    """Drop chord flickers shorter than one beat and collapse consecutive runs."""
+    beat_times = beats.get("beats") or []
+    if not chords.get("segments") or not beat_times or len(beat_times) < 2:
+        return chords
+    beat_interval = max(
+        (beat_times[i + 1] - beat_times[i]) for i in range(len(beat_times) - 1)
+    )
+    min_duration = max(0.25, beat_interval * 0.75)
+
+    segs = sorted(chords["segments"], key=lambda s: float(s.get("start", 0.0)))
+    kept: list[dict[str, Any]] = []
+    for seg in segs:
+        start = float(seg.get("start", 0.0))
+        end = float(seg.get("end", start))
+        dur = end - start
+        if dur < min_duration:
+            continue
+        if kept and kept[-1]["chord"] == seg.get("chord"):
+            kept[-1]["end"] = max(float(kept[-1]["end"]), end)
+        else:
+            kept.append({**seg, "start": round(start, 3), "end": round(end, 3)})
+    return {**chords, "segments": kept}
+
+
+# -------- Detection (existing Chordino + Python fallback) -------------------
 
 
 def _mock_chords(reason: str) -> dict[str, Any]:
@@ -23,29 +141,121 @@ def _mock_chords(reason: str) -> dict[str, Any]:
 
 _NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
+# Chroma templates used by the Python chord detector.
+# Each template is a 12-bin pitch-class vector + a score weight applied post-
+# cosine to bias the detector toward simpler chords (matches typical chord-sheet
+# notation where 7th extensions are often omitted unless prominent).
+_QUALITIES: list[tuple[str, tuple[int, ...], float]] = [
+    ("",      (0, 4, 7),      1.00),  # major triad
+    ("m",     (0, 3, 7),      1.00),  # minor triad
+    ("5",     (0, 7),         0.95),  # power chord
+    ("7",     (0, 4, 7, 10),  0.85),  # dominant 7th
+    ("m7",    (0, 3, 7, 10),  0.85),  # minor 7th
+    ("maj7",  (0, 4, 7, 11),  0.85),  # major 7th
+    ("dim",   (0, 3, 6),      0.85),  # diminished triad
+]
+
+# Diatonic chord qualities per scale degree, used to bias scores toward
+# chords that "fit" the detected key (major / natural minor).
+_MAJOR_DEGREES = {0: "", 2: "m", 4: "m", 5: "", 7: "", 9: "m", 11: "dim"}
+_MINOR_DEGREES = {0: "m", 2: "dim", 3: "", 5: "m", 7: "m", 8: "", 10: ""}
+
 
 def _build_chord_templates():
     import numpy as np
 
-    major_intervals = [0, 4, 7]
-    minor_intervals = [0, 3, 7]
     templates: dict[str, Any] = {}
+    weights: dict[str, float] = {}
     for root in range(12):
-        major = np.zeros(12, dtype=float)
-        minor = np.zeros(12, dtype=float)
-        for interval in major_intervals:
-            major[(root + interval) % 12] = 1.0
-        for interval in minor_intervals:
-            minor[(root + interval) % 12] = 1.0
-        templates[_NOTE_NAMES[root]] = major
-        templates[f"{_NOTE_NAMES[root]}m"] = minor
-    return templates
+        for suffix, intervals, weight in _QUALITIES:
+            vec = np.zeros(12, dtype=float)
+            for interval in intervals:
+                vec[(root + interval) % 12] = 1.0
+            name = f"{_NOTE_NAMES[root]}{suffix}"
+            templates[name] = vec
+            weights[name] = weight
+    return templates, weights
 
 
-def _python_chord_estimation(input_audio: Path) -> dict[str, Any]:
+def _key_bias(chord_name: str, key: str) -> float:
+    """Return a small log-prob boost (0 .. +0.15) for chords that belong to
+    the detected key. Non-key chords get 0."""
+    if not key:
+        return 0.0
+    import re as _re
+
+    m = _re.match(r"^([A-G][#b]?)(m?)$", key)
+    if not m:
+        return 0.0
+    key_root = m.group(1)
+    key_is_minor = bool(m.group(2))
+    sharp_to_flat = {"C#": "C#", "D#": "D#", "F#": "F#", "G#": "G#", "A#": "A#",
+                     "Db": "C#", "Eb": "D#", "Gb": "F#", "Ab": "G#", "Bb": "A#"}
+    key_root = sharp_to_flat.get(key_root, key_root)
+    if key_root not in _NOTE_NAMES:
+        return 0.0
+    key_idx = _NOTE_NAMES.index(key_root)
+    degrees = _MINOR_DEGREES if key_is_minor else _MAJOR_DEGREES
+
+    # split chord_name into root + suffix
+    cm = _re.match(r"^([A-G][#b]?)(.*)$", chord_name)
+    if not cm:
+        return 0.0
+    croot = sharp_to_flat.get(cm.group(1), cm.group(1))
+    if croot not in _NOTE_NAMES:
+        return 0.0
+    croot_idx = _NOTE_NAMES.index(croot)
+    csuffix = cm.group(2)
+    base_suffix = csuffix
+    if csuffix in {"7", "m7", "maj7"}:
+        base_suffix = {"7": "", "m7": "m", "maj7": ""}[csuffix]
+    elif csuffix == "5":
+        base_suffix = ""
+
+    diff = (croot_idx - key_idx) % 12
+    return 0.12 if degrees.get(diff) == base_suffix else 0.0
+
+
+def _viterbi_decode(emission_log: "np.ndarray", self_bonus: float = 0.35) -> list[int]:
+    """Tiny Viterbi with a uniform transition cost and a self-loop bonus
+    that strongly discourages flickering between chords.
+    emission_log: (T, K) log-probabilities. Returns list of K indices."""
+    import numpy as np
+
+    T, K = emission_log.shape
+    if T == 0:
+        return []
+    dp = np.full((T, K), -np.inf, dtype=np.float64)
+    bp = np.zeros((T, K), dtype=np.int32)
+    dp[0] = emission_log[0]
+    for t in range(1, T):
+        # Best predecessor for each state
+        prev = dp[t - 1]
+        best_prev = prev.max()
+        best_prev_idx = int(prev.argmax())
+        # Transition score: self-loop gets a bonus; all others get best_prev
+        for k in range(K):
+            stay_score = prev[k] + self_bonus
+            if stay_score >= best_prev:
+                dp[t, k] = stay_score + emission_log[t, k]
+                bp[t, k] = k
+            else:
+                dp[t, k] = best_prev + emission_log[t, k]
+                bp[t, k] = best_prev_idx
+    # Back-trace
+    path = [int(dp[-1].argmax())]
+    for t in range(T - 1, 0, -1):
+        path.append(int(bp[t, path[-1]]))
+    path.reverse()
+    return path
+
+
+def _python_chord_estimation(input_audio: Path, key: str = "") -> dict[str, Any]:
+    """Beat-synchronous, multi-template, Viterbi-smoothed chord detector.
+    Works in pure Python (librosa + numpy), no VAMP hosts required."""
     try:
-        import numpy as np
         import librosa
+        import numpy as np
     except Exception as exc:
         return _mock_chords(f"python chord detector unavailable: {exc}")
 
@@ -54,57 +264,90 @@ def _python_chord_estimation(input_audio: Path) -> dict[str, Any]:
         if y.size == 0:
             return _mock_chords("audio decoded empty in python detector")
 
+        # High-resolution chroma, then beat-sync so one frame = one beat.
         hop_length = 512
-        chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=hop_length)
-        if chroma.shape[1] == 0:
-            return _mock_chords("no chroma frames in python detector")
-
-        templates = _build_chord_templates()
-        chord_names = list(templates.keys())
-        template_matrix = np.stack([templates[name] for name in chord_names], axis=0)
-        template_norm = np.linalg.norm(template_matrix, axis=1, keepdims=True) + 1e-9
-        template_matrix = template_matrix / template_norm
-
-        frame_chords: list[str] = []
-        for i in range(chroma.shape[1]):
-            v = chroma[:, i].astype(float)
-            v_norm = np.linalg.norm(v)
-            if v_norm <= 1e-9:
-                frame_chords.append("N")
-                continue
-            v = v / v_norm
-            scores = template_matrix @ v
-            idx = int(np.argmax(scores))
-            frame_chords.append(chord_names[idx])
-
-        times = librosa.frames_to_time(
-            list(range(chroma.shape[1])),
-            sr=sr,
-            hop_length=hop_length,
+        chroma = librosa.feature.chroma_cqt(
+            y=y, sr=sr, hop_length=hop_length, bins_per_octave=36
         )
+        # Median-filter chroma slightly to remove transients.
+        chroma = np.clip(chroma, 0, 1)
+        if chroma.shape[1] < 4:
+            return _mock_chords("too few chroma frames")
 
+        try:
+            tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, hop_length=hop_length)
+            if len(beat_frames) >= 4:
+                chroma_beats = librosa.util.sync(chroma, beat_frames, aggregate=np.median)
+                beat_times = librosa.frames_to_time(beat_frames, sr=sr, hop_length=hop_length)
+            else:
+                chroma_beats = chroma
+                beat_times = librosa.frames_to_time(
+                    np.arange(chroma.shape[1]), sr=sr, hop_length=hop_length
+                )
+        except Exception:
+            chroma_beats = chroma
+            beat_times = librosa.frames_to_time(
+                np.arange(chroma.shape[1]), sr=sr, hop_length=hop_length
+            )
+
+        templates, weights = _build_chord_templates()
+        chord_names = list(templates.keys())
+        template_matrix = np.stack([templates[n] for n in chord_names], axis=0)
+        template_matrix /= np.linalg.norm(template_matrix, axis=1, keepdims=True) + 1e-9
+        template_weights = np.array([weights[n] for n in chord_names], dtype=np.float64)
+        T = chroma_beats.shape[1]
+        K = len(chord_names)
+
+        # Cosine-similarity emission; append a fixed "No chord" score.
+        emission = np.zeros((T, K + 1), dtype=np.float64)
+        silence_threshold = 0.05
+        for t in range(T):
+            v = chroma_beats[:, t].astype(np.float64)
+            n = np.linalg.norm(v)
+            if n < silence_threshold:
+                emission[t, K] = 1.0
+                continue
+            v /= n + 1e-9
+            emission[t, :K] = (template_matrix @ v) * template_weights
+            emission[t, K] = 0.25  # baseline noise floor for "No chord"
+
+        # Key bias
+        if key:
+            bias = np.array([_key_bias(n, key) for n in chord_names] + [0.0])
+            emission += bias[None, :]
+
+        # log-probabilities (add small floor to avoid log(0))
+        emission_log = np.log(np.clip(emission, 1e-4, None))
+
+        # Viterbi
+        names_with_n = chord_names + ["N"]
+        path = _viterbi_decode(emission_log, self_bonus=0.35)
+        frame_chords = [names_with_n[i] for i in path]
+
+        # Convert frame indices to time intervals.
         segments: list[dict[str, float | str]] = []
-        start_idx = 0
-        for i in range(1, len(frame_chords) + 1):
-            if i == len(frame_chords) or frame_chords[i] != frame_chords[start_idx]:
-                chord = frame_chords[start_idx]
-                if chord != "N":
-                    start_t = float(times[start_idx])
-                    end_t = float(times[min(i, len(times) - 1)])
-                    if end_t - start_t >= 0.25:
-                        segments.append(
-                            {
-                                "start": round(start_t, 3),
-                                "end": round(end_t, 3),
-                                "chord": chord,
-                            }
-                        )
-                start_idx = i
+        end_time = float(len(y) / sr)
+        for i in range(T):
+            start_t = float(beat_times[i]) if i < len(beat_times) else 0.0
+            if i + 1 < T and i + 1 < len(beat_times):
+                end_t = float(beat_times[i + 1])
+            else:
+                end_t = end_time
+            chord = frame_chords[i]
+            if chord == "N":
+                continue
+            if end_t - start_t < 0.1:
+                continue
+            if segments and segments[-1]["chord"] == chord:
+                segments[-1]["end"] = round(end_t, 3)
+            else:
+                segments.append(
+                    {"start": round(start_t, 3), "end": round(end_t, 3), "chord": chord}
+                )
 
         if not segments:
             return _mock_chords("python detector produced zero chord segments")
-
-        return {"mode": "python", "warning": "", "segments": segments}
+        return {"mode": "python", "warning": "", "segments": segments, "key": key}
     except Exception as exc:
         return _mock_chords(f"python chord detection failed: {exc}")
 
@@ -138,10 +381,12 @@ def _parse_chord_csv(csv_path: Path) -> list[dict[str, float | str]]:
     return items
 
 
-def detect_chords(input_audio: Path, tmp_dir: Path) -> dict[str, Any]:
+def detect_chords(input_audio: Path, tmp_dir: Path, key: str = "") -> dict[str, Any]:
     tmp_dir.mkdir(parents=True, exist_ok=True)
     project_root = Path(__file__).resolve().parents[1]
-    local_sonic = project_root / "tools" / "sonic-annotator" / "sonic-annotator-win64" / "sonic-annotator.exe"
+    local_sonic = (
+        project_root / "tools" / "sonic-annotator" / "sonic-annotator-win64" / "sonic-annotator.exe"
+    )
     sonic_exe = str(local_sonic) if local_sonic.exists() else "sonic-annotator"
 
     env = os.environ.copy()
@@ -163,7 +408,7 @@ def detect_chords(input_audio: Path, tmp_dir: Path) -> dict[str, Any]:
         ]
         subprocess.run(cmd, check=True, capture_output=True, text=True, env=env)
     except Exception as exc:
-        python_result = _python_chord_estimation(input_audio)
+        python_result = _python_chord_estimation(input_audio, key=key)
         if python_result.get("mode") == "python":
             python_result["warning"] = f"chordino unavailable, using python detector: {exc}"
             return python_result
@@ -176,9 +421,9 @@ def detect_chords(input_audio: Path, tmp_dir: Path) -> dict[str, Any]:
 
     segments = _parse_chord_csv(csv_candidates[0])
     if not segments:
-        python_result = _python_chord_estimation(input_audio)
+        python_result = _python_chord_estimation(input_audio, key=key)
         if python_result.get("mode") == "python":
-            python_result["warning"] = "chordino returned empty output, using python detector"
+            python_result["warning"] = "chordino empty output, using python detector"
             return python_result
         return _mock_chords("Chord CSV parsed with zero segments.")
 
@@ -187,5 +432,7 @@ def detect_chords(input_audio: Path, tmp_dir: Path) -> dict[str, Any]:
 
 def write_json(payload: dict[str, Any], output_path: Path) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    output_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     return output_path

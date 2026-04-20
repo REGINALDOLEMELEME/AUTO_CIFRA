@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <title>AUTO_CIFRA</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main class="container">
+  <header class="page-header">
+    <h1>AUTO_CIFRA</h1>
+    <p class="subtitle">Gera cifras profissionais a partir de áudio — 100% local, 100% livre.</p>
+  </header>
+
+  <!-- Upload -->
+  <section class="card upload-card">
+    <div class="upload-zone" id="drop-zone">
+      <div class="upload-icon">⬆</div>
+      <div class="upload-text">
+        <strong>Arraste um arquivo de áudio</strong> ou
+        <label class="file-label">
+          <input type="file" id="file-input" accept=".mp3,.wav,.m4a,.flac,.ogg">
+          <span>clique para selecionar</span>
+        </label>
+      </div>
+      <div class="upload-hint">MP3, WAV, M4A, FLAC ou OGG · até 20 min</div>
+    </div>
+    <div id="upload-status" class="upload-status"></div>
+  </section>
+
+  <!-- Pipeline visualization -->
+  <section class="card pipeline-card hidden" id="pipeline">
+    <div class="pipeline-header">
+      <div>
+        <h2>Pipeline</h2>
+        <div class="pipeline-meta">
+          <span class="pill" id="job-id-pill">—</span>
+          <span class="pill" id="filename-pill">—</span>
+        </div>
+      </div>
+      <div class="pipeline-stats">
+        <div class="stat">
+          <span class="stat-label">Decorrido</span>
+          <span class="stat-value" id="elapsed">00:00</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Estimado</span>
+          <span class="stat-value" id="eta">~11 min</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="overall-progress">
+      <div class="progress-bar big">
+        <div class="progress-fill" id="overall-fill"></div>
+      </div>
+      <div class="overall-label"><span id="overall-pct">0%</span></div>
+    </div>
+
+    <ol class="phases">
+      <li class="phase" data-stage="separating" data-budget="240">
+        <div class="phase-dot"></div>
+        <div class="phase-body">
+          <div class="phase-row">
+            <span class="phase-name">1 · Isolamento de vocais</span>
+            <span class="phase-status">pendente</span>
+            <span class="phase-budget">~4 min</span>
+          </div>
+          <p class="phase-desc">Demucs separa a voz da instrumentação. Whisper transcreve só a voz limpa.</p>
+          <div class="progress-bar">
+            <div class="progress-fill"></div>
+          </div>
+        </div>
+      </li>
+
+      <li class="phase" data-stage="transcribing" data-budget="300">
+        <div class="phase-dot"></div>
+        <div class="phase-body">
+          <div class="phase-row">
+            <span class="phase-name">2 · Transcrição de letras</span>
+            <span class="phase-status">pendente</span>
+            <span class="phase-budget">~5 min</span>
+          </div>
+          <p class="phase-desc">Whisper large-v3 (int8) gera as palavras com carimbos de tempo aproximados.</p>
+          <div class="progress-bar">
+            <div class="progress-fill"></div>
+          </div>
+        </div>
+      </li>
+
+      <li class="phase" data-stage="aligning" data-budget="60">
+        <div class="phase-dot"></div>
+        <div class="phase-body">
+          <div class="phase-row">
+            <span class="phase-name">3 · Alinhamento de palavras</span>
+            <span class="phase-status">pendente</span>
+            <span class="phase-budget">~1 min</span>
+          </div>
+          <p class="phase-desc">WhisperX + wav2vec2 PT-BR refina os tempos para ±20&nbsp;ms por palavra.</p>
+          <div class="progress-bar">
+            <div class="progress-fill"></div>
+          </div>
+        </div>
+      </li>
+
+      <li class="phase" data-stage="chords" data-budget="60">
+        <div class="phase-dot"></div>
+        <div class="phase-body">
+          <div class="phase-row">
+            <span class="phase-name">4 · Detecção de acordes</span>
+            <span class="phase-status">pendente</span>
+            <span class="phase-budget">~1 min</span>
+          </div>
+          <p class="phase-desc">Chordino mapeia acordes e suaviza no compasso. Vocabulário reduzido a tríades + 7as.</p>
+          <div class="progress-bar">
+            <div class="progress-fill"></div>
+          </div>
+        </div>
+      </li>
+
+      <li class="phase" data-stage="structure" data-budget="10">
+        <div class="phase-dot"></div>
+        <div class="phase-body">
+          <div class="phase-row">
+            <span class="phase-name">5 · Estrutura da música</span>
+            <span class="phase-status">pendente</span>
+            <span class="phase-budget">~10 s</span>
+          </div>
+          <p class="phase-desc">Detecta [Intro] [Verso] [Refrão] [Ponte] por análise de segmentação.</p>
+          <div class="progress-bar">
+            <div class="progress-fill"></div>
+          </div>
+        </div>
+      </li>
+
+      <li class="phase" data-stage="rendering" data-budget="2">
+        <div class="phase-dot"></div>
+        <div class="phase-body">
+          <div class="phase-row">
+            <span class="phase-name">6 · Renderização final</span>
+            <span class="phase-status">pendente</span>
+            <span class="phase-budget">&lt;1 s</span>
+          </div>
+          <p class="phase-desc">Combina acordes e letras alinhados no arquivo JSON final da revisão.</p>
+          <div class="progress-bar">
+            <div class="progress-fill"></div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <div id="warnings" class="warnings hidden"></div>
+    <div id="error-box" class="error-box hidden"></div>
+
+    <div class="actions">
+      <a id="btn-review" class="btn disabled" href="#">Revisar</a>
+      <a id="btn-export" class="btn btn-primary disabled" href="#">Exportar DOCX</a>
+      <button type="button" id="btn-new" class="btn btn-ghost">Novo áudio</button>
+    </div>
+  </section>
+
+  <!-- History -->
+  <section class="card">
+    <div class="card-title-row">
+      <h2>Histórico</h2>
+      <button type="button" id="refresh-history" class="btn btn-ghost btn-sm">Atualizar</button>
+    </div>
+    <div id="history" class="history">—</div>
+  </section>
+</main>
+
+<script>
+(function () {
+  const STAGE_ORDER = ["separating", "transcribing", "aligning", "chords", "structure", "rendering"];
+  const PT_LABELS = {
+    uploaded: "enviado",
+    queued: "na fila",
+    separating: "isolando voz",
+    transcribing: "transcrevendo",
+    aligning: "alinhando",
+    chords: "detectando acordes",
+    structure: "detectando estrutura",
+    rendering: "renderizando",
+    ready_for_review: "pronto para revisar",
+    exported: "exportado",
+    error: "erro",
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const qs = (sel, parent = document) => parent.querySelector(sel);
+  const qsa = (sel, parent = document) => Array.from(parent.querySelectorAll(sel));
+
+  const fileInput = $("file-input");
+  const dropZone = $("drop-zone");
+  const pipeline = $("pipeline");
+  const uploadStatus = $("upload-status");
+  const overallFill = $("overall-fill");
+  const overallPct = $("overall-pct");
+  const elapsed = $("elapsed");
+  const eta = $("eta");
+  const btnReview = $("btn-review");
+  const btnExport = $("btn-export");
+  const btnNew = $("btn-new");
+  const historyBox = $("history");
+  const warningsBox = $("warnings");
+  const errorBox = $("error-box");
+  const jobIdPill = $("job-id-pill");
+  const filenamePill = $("filename-pill");
+
+  let currentJobId = null;
+  let pollTimer = null;
+  let startTs = null;
+  let elapsedTimer = null;
+
+  // Drag-drop
+  ["dragover", "dragenter"].forEach((ev) => {
+    dropZone.addEventListener(ev, (e) => {
+      e.preventDefault();
+      dropZone.classList.add("dragging");
+    });
+  });
+  ["dragleave", "drop"].forEach((ev) => {
+    dropZone.addEventListener(ev, (e) => {
+      e.preventDefault();
+      dropZone.classList.remove("dragging");
+    });
+  });
+  dropZone.addEventListener("drop", (e) => {
+    if (e.dataTransfer?.files?.length) {
+      handleFile(e.dataTransfer.files[0]);
+    }
+  });
+  // Clicking anywhere on the drop zone opens the file picker (not only the link).
+  dropZone.addEventListener("click", (e) => {
+    // Ignore clicks that originated on the real input/label — they already handle it.
+    if (e.target === fileInput || e.target.closest(".file-label")) return;
+    fileInput.click();
+  });
+  fileInput.addEventListener("change", (e) => {
+    const f = e.target.files?.[0];
+    if (f) handleFile(f);
+  });
+  btnNew.addEventListener("click", resetAll);
+
+  async function handleFile(file) {
+    resetPipeline();
+    pipeline.classList.remove("hidden");
+    uploadStatus.textContent = `Enviando ${file.name} (${fmtBytes(file.size)})…`;
+    const fd = new FormData();
+    fd.append("file", file);
+    let res;
+    try {
+      res = await fetch("/upload", { method: "POST", body: fd });
+    } catch (err) {
+      showError(`Falha de rede no upload: ${err.message}`);
+      return;
+    }
+    if (!res.ok) {
+      const body = await res.text();
+      showError(`Upload falhou (HTTP ${res.status}): ${body}`);
+      return;
+    }
+    const json = await res.json();
+    const job = json.job;
+    currentJobId = job.id;
+    uploadStatus.textContent = `Enviado: ${file.name}`;
+    jobIdPill.textContent = job.id;
+    filenamePill.textContent = job.filename;
+
+    // Auto-start
+    const procRes = await fetch(`/process/${currentJobId}`, { method: "POST" });
+    if (!procRes.ok) {
+      showError(`Falha ao iniciar: HTTP ${procRes.status}`);
+      return;
+    }
+    startTs = Date.now();
+    startElapsedTimer();
+    startPolling();
+    loadHistory();
+  }
+
+  function startPolling() {
+    stopPolling();
+    pollTimer = setInterval(pollStatus, 1500);
+    pollStatus();
+  }
+  function stopPolling() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+  function startElapsedTimer() {
+    if (elapsedTimer) clearInterval(elapsedTimer);
+    elapsedTimer = setInterval(() => {
+      if (!startTs) return;
+      elapsed.textContent = fmtDuration((Date.now() - startTs) / 1000);
+    }, 500);
+  }
+  function stopElapsedTimer() {
+    if (elapsedTimer) clearInterval(elapsedTimer);
+    elapsedTimer = null;
+  }
+
+  async function pollStatus() {
+    if (!currentJobId) return;
+    let res;
+    try {
+      res = await fetch(`/jobs/${currentJobId}`);
+    } catch (err) {
+      return;
+    }
+    if (!res.ok) return;
+    const job = await res.json();
+    applyJob(job);
+  }
+
+  function applyJob(job) {
+    updatePhases(job.stage, job.progress);
+    overallFill.style.width = `${Math.round(job.progress * 100)}%`;
+    overallPct.textContent = `${Math.round(job.progress * 100)}%`;
+    updateEta(job.stage, job.progress);
+
+    if (job.stage === "ready_for_review" || job.stage === "exported") {
+      stopPolling();
+      stopElapsedTimer();
+      btnReview.classList.remove("disabled");
+      btnReview.href = `/review/${job.id}`;
+      btnExport.classList.remove("disabled");
+      btnExport.onclick = (e) => { e.preventDefault(); exportDocx(job.id); };
+    } else if (job.stage === "error") {
+      stopPolling();
+      stopElapsedTimer();
+      showError(`Pipeline falhou: ${job.error || "erro desconhecido"}`);
+    }
+  }
+
+  function updatePhases(stage, progress) {
+    const currentIdx = STAGE_ORDER.indexOf(stage);
+    qsa(".phase").forEach((el, idx) => {
+      const phaseStage = el.dataset.stage;
+      const fill = qs(".progress-fill", el);
+      const statusEl = qs(".phase-status", el);
+      if (idx < currentIdx || stage === "ready_for_review" || stage === "exported") {
+        el.classList.add("done");
+        el.classList.remove("active", "pending");
+        fill.style.width = "100%";
+        statusEl.textContent = "concluído";
+      } else if (idx === currentIdx) {
+        el.classList.add("active");
+        el.classList.remove("done", "pending");
+        const local = localProgressFor(phaseStage, progress);
+        fill.style.width = `${Math.round(local * 100)}%`;
+        statusEl.textContent = PT_LABELS[stage] || stage;
+      } else {
+        el.classList.add("pending");
+        el.classList.remove("done", "active");
+        fill.style.width = "0%";
+        statusEl.textContent = "pendente";
+      }
+    });
+  }
+
+  // Map the global [0..1] progress to the per-phase [0..1] window
+  function localProgressFor(stage, globalProgress) {
+    const WINDOWS = {
+      separating: [0.05, 0.25],
+      transcribing: [0.25, 0.55],
+      aligning: [0.55, 0.70],
+      chords: [0.70, 0.85],
+      structure: [0.85, 0.95],
+      rendering: [0.95, 1.00],
+    };
+    const [lo, hi] = WINDOWS[stage] || [0, 1];
+    const span = Math.max(hi - lo, 1e-3);
+    return Math.max(0, Math.min(1, (globalProgress - lo) / span));
+  }
+
+  function updateEta(stage, progress) {
+    const remaining = Math.max(1 - progress, 0);
+    const totalBudgetSec = 11 * 60;
+    const etaSec = remaining * totalBudgetSec;
+    if (stage === "ready_for_review" || stage === "exported") {
+      eta.textContent = "concluído";
+    } else if (stage === "error") {
+      eta.textContent = "—";
+    } else {
+      eta.textContent = `~${fmtDuration(etaSec)}`;
+    }
+  }
+
+  async function exportDocx(jobId) {
+    btnExport.textContent = "exportando…";
+    const res = await fetch(`/export/${jobId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prefer_flats: true }),
+    });
+    if (!res.ok) {
+      showError(`Exportação falhou: HTTP ${res.status}`);
+      btnExport.textContent = "Exportar DOCX";
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${(filenamePill.textContent || "song").replace(/\.[^.]+$/, "")}.docx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    btnExport.textContent = "Exportar DOCX";
+  }
+
+  function resetPipeline() {
+    stopPolling();
+    stopElapsedTimer();
+    elapsed.textContent = "00:00";
+    eta.textContent = "~11 min";
+    overallFill.style.width = "0%";
+    overallPct.textContent = "0%";
+    errorBox.classList.add("hidden");
+    errorBox.textContent = "";
+    warningsBox.classList.add("hidden");
+    warningsBox.innerHTML = "";
+    btnReview.classList.add("disabled");
+    btnExport.classList.add("disabled");
+    btnReview.href = "#";
+    btnExport.onclick = null;
+    qsa(".phase").forEach((el) => {
+      el.classList.remove("done", "active");
+      el.classList.add("pending");
+      qs(".progress-fill", el).style.width = "0%";
+      qs(".phase-status", el).textContent = "pendente";
+    });
+  }
+
+  function resetAll() {
+    resetPipeline();
+    pipeline.classList.add("hidden");
+    currentJobId = null;
+    fileInput.value = "";
+    uploadStatus.textContent = "";
+    jobIdPill.textContent = "—";
+    filenamePill.textContent = "—";
+  }
+
+  function showError(msg) {
+    stopPolling();
+    stopElapsedTimer();
+    errorBox.textContent = msg;
+    errorBox.classList.remove("hidden");
+  }
+
+  function fmtDuration(sec) {
+    sec = Math.max(0, Math.round(sec));
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+  function fmtBytes(n) {
+    if (n < 1024) return `${n} B`;
+    if (n < 1048576) return `${(n / 1024).toFixed(0)} KB`;
+    return `${(n / 1048576).toFixed(1)} MB`;
+  }
+
+  async function loadHistory() {
+    try {
+      const res = await fetch("/history");
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.items.length) {
+        historyBox.innerHTML = '<div class="empty">Sem jobs ainda.</div>';
+        return;
+      }
+      historyBox.innerHTML = data.items
+        .map((j) => {
+          const when = new Date(j.updated_ts * 1000).toLocaleString("pt-BR");
+          const stage = PT_LABELS[j.stage] || j.stage;
+          const cls = j.stage === "error" ? "error" : j.stage === "ready_for_review" || j.stage === "exported" ? "done" : "pending";
+          const links = [];
+          if (j.stage === "ready_for_review" || j.stage === "exported") {
+            links.push(`<a href="/review/${j.job_id}">Revisar</a>`);
+          }
+          if (j.output_docx) {
+            links.push(`<span class="muted">DOCX: ${j.output_docx.split(/[\\/]/).pop()}</span>`);
+          }
+          return `<div class="history-item ${cls}">
+            <div class="history-main">
+              <div class="history-name">${j.filename}</div>
+              <div class="history-sub">${j.job_id} · <span class="stage-${cls}">${stage}</span> · ${when}</div>
+            </div>
+            <div class="history-actions">${links.join(" · ")}</div>
+          </div>`;
+        })
+        .join("");
+    } catch (err) {
+      historyBox.innerHTML = `<div class="empty">histórico indisponível</div>`;
+    }
+  }
+
+  $("refresh-history").addEventListener("click", loadHistory);
+  loadHistory();
+})();
+</script>
+</body>
+</html>

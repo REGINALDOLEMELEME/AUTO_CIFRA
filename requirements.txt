@@ -1,8 +1,30 @@
-﻿faster-whisper==1.1.1
-python-docx==1.1.2
-streamlit==1.44.1
+# Install order:
+#   1) torch + torchaudio CPU from PyTorch CPU wheel index (see scripts/setup.ps1)
+#   2) this file
+#
+# NB: av==12.3.0 binary; numba==0.61.2 supports numpy 2.x + Python 3.11.
+
+av==12.3.0
+faster-whisper==1.2.1
+demucs==4.0.1
+whisperx==3.4.2
+numba==0.61.2
+librosa==0.10.2
+soundfile==0.12.1
 pydub==0.25.1
+
+# Web stack (ADR-002 + ADR-006)
+fastapi==0.115.4
+uvicorn[standard]==0.32.0
+python-multipart==0.0.12
+jinja2==3.1.4
+pydantic==2.9.2
+pydantic-settings==2.6.1
+
+# Output
+python-docx==1.1.2
+
+# Config / data
+pyyaml==6.0.2
 numpy==2.1.3
 pandas==2.2.3
-pyyaml==6.0.2
-demucs==4.0.1

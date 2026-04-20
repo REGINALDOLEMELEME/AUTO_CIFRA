@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .audio import normalize_audio
+from .models import get_whisper
 
 
 @dataclass
@@ -20,25 +21,26 @@ def transcribe_audio(
     input_audio: Path,
     tmp_dir: Path,
     language: str = "pt",
-    model_size: str = "small",
+    model_size: str = "large-v3",
     use_vad: bool = False,
+    compute_type: str = "int8",
+    device: str = "cpu",
 ) -> dict[str, Any]:
+    tmp_dir.mkdir(parents=True, exist_ok=True)
     normalized_audio = tmp_dir / f"{input_audio.stem}.normalized.wav"
     normalize_audio(input_audio=input_audio, output_audio=normalized_audio)
 
-    try:
-        from faster_whisper import WhisperModel
-    except ImportError as exc:
-        raise RuntimeError(
-            "faster-whisper is not installed. Run setup script first."
-        ) from exc
+    model, err = get_whisper(model_size=model_size, device=device, compute_type=compute_type)
+    if model is None or err:
+        raise RuntimeError(err or "faster-whisper is not available")
 
-    model = WhisperModel(model_size, device="cpu", compute_type="int8")
     segments, info = model.transcribe(
         str(normalized_audio),
         language=language,
         vad_filter=use_vad,
         word_timestamps=True,
+        beam_size=5,
+        condition_on_previous_text=True,
     )
 
     items: list[LyricSegment] = []
@@ -51,14 +53,10 @@ def transcribe_audio(
             wt = (getattr(w, "word", "") or "").strip()
             if not wt:
                 continue
-            w_start = float(getattr(w, "start", segment.start))
-            w_end = float(getattr(w, "end", w_start))
+            w_start = float(getattr(w, "start", segment.start) or segment.start)
+            w_end = float(getattr(w, "end", w_start) or w_start)
             words.append(
-                {
-                    "start": round(w_start, 3),
-                    "end": round(w_end, 3),
-                    "word": wt,
-                }
+                {"start": round(w_start, 3), "end": round(w_end, 3), "word": wt}
             )
         items.append(
             LyricSegment(
@@ -76,6 +74,8 @@ def transcribe_audio(
         "language_probability": float(getattr(info, "language_probability", 0.0)),
         "duration": float(getattr(info, "duration", 0.0)),
         "segments": [asdict(item) for item in items],
+        "mode": "real",
+        "model_size": model_size,
     }
 
 

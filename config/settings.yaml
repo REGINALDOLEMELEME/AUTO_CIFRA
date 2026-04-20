@@ -1,12 +1,45 @@
-﻿app:
+app:
   language: pt
-  use_demucs: true
-  docx_style: spaced
+
 paths:
   input_dir: data/input
   output_dir: data/output
   tmp_dir: data/tmp
-tools:
-  ffmpeg_required: true
-  sonic_annotator_required: true
-  chordino_required: true
+  models_dir: models
+  db_path: data/jobs.sqlite
+  frontend_dir: frontend
+
+asr:
+  model: large-v3
+  device: cpu
+  compute_type: int8
+  language: pt
+
+separation:
+  enabled: true
+  model: htdemucs_ft
+
+alignment:
+  enabled: true
+  # empty => whisperx picks its default wav2vec2 for the configured language
+  model: ""
+
+chords:
+  backend: chordino
+  vocabulary: [maj, min, "5", "7", m7, maj7, m7b5, dim, sus4]
+
+structure:
+  enabled: true
+  n_segments: 6
+  confidence_threshold: 0.6
+
+docx:
+  style: table
+  body_font: Calibri
+  chord_font: Calibri
+  body_size_pt: 11
+  chord_size_pt: 11
+
+worker:
+  stage_timeout_seconds: 900
+  poll_interval_seconds: 1.0

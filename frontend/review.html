@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <title>Revisar — {{ job.filename }}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/htmx.min.js" defer></script>
+</head>
+<body>
+<main class="container review">
+  <header class="review-header">
+    <h1>{{ job.filename }}</h1>
+    <p class="meta">
+      Job <code>{{ job.id }}</code> · Stage <code>{{ job.stage }}</code>
+    </p>
+
+    <form id="options-form" class="options">
+      <label>Transpose
+        <input type="number" name="transpose_semitones" min="-11" max="11"
+               value="{{ job.transpose_semitones }}" id="opt-transpose">
+      </label>
+      <label>Capo
+        <input type="number" name="capo_fret" min="0" max="11"
+               value="{{ job.capo_fret }}" id="opt-capo">
+      </label>
+      <label>
+        <input type="checkbox" id="opt-flats" checked> Prefer flats (Bb, Eb...)
+      </label>
+      <button type="button" id="btn-save">Save</button>
+      <button type="button" id="btn-export">Export DOCX</button>
+      <a href="/" class="btn-link">Back</a>
+    </form>
+    {% if aligned.warnings %}
+    <ul class="warnings">
+      {% for w in aligned.warnings %}<li>⚠ {{ w }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    <div id="save-result" class="status"></div>
+  </header>
+
+  <section class="song" id="song">
+    {% for line in aligned.lines %}
+      {% if line.section %}
+        <h3 class="section">[{{ line.section }}]</h3>
+      {% endif %}
+      <div class="line" data-line-index="{{ loop.index0 }}">
+        <div class="chord-row">
+          {% for w in line.words %}
+          <input class="chord"
+                 data-word-index="{{ loop.index0 }}"
+                 value="{{ w.chord or '' }}"
+                 placeholder="·"
+                 size="{{ ((w.chord or '')|length) or 2 }}">
+          {% endfor %}
+        </div>
+        <div class="word-row">
+          {% for w in line.words %}
+          <input class="word"
+                 data-word-index="{{ loop.index0 }}"
+                 value="{{ w.text }}"
+                 size="{{ ((w.text or '')|length) or 2 }}">
+          {% endfor %}
+        </div>
+      </div>
+    {% endfor %}
+  </section>
+</main>
+
+<script>
+(function () {
+  const jobId = {{ job.id | tojson }};
+  const initial = {{ aligned | tojson }};
+
+  function collect() {
+    const lines = [];
+    document.querySelectorAll('#song .line').forEach((el) => {
+      const idx = parseInt(el.dataset.lineIndex, 10);
+      const base = initial.lines[idx] || { start: 0, end: 0 };
+      const chordInputs = el.querySelectorAll('.chord');
+      const wordInputs = el.querySelectorAll('.word');
+      const words = [];
+      for (let i = 0; i < wordInputs.length; i += 1) {
+        const wBase = (base.words && base.words[i]) || { start: base.start || 0, end: base.end || 0 };
+        words.push({
+          text: wordInputs[i].value,
+          start: wBase.start || 0,
+          end: wBase.end || 0,
+          chord: chordInputs[i].value.trim() || null
+        });
+      }
+      lines.push({
+        section: base.section || null,
+        start: base.start || 0,
+        end: base.end || 0,
+        words,
+        lyric_line: words.map(w => w.text).join(' '),
+        chord_line: words.filter(w => w.chord).map(w => w.chord).join(' '),
+      });
+    });
+    return {
+      source_file: initial.source_file || '',
+      transcription_mode: initial.transcription_mode || 'real',
+      chord_mode: initial.chord_mode || 'real',
+      warnings: initial.warnings || [],
+      lines,
+    };
+  }
+
+  const saveResult = document.getElementById('save-result');
+
+  document.getElementById('btn-save').addEventListener('click', async () => {
+    saveResult.textContent = 'saving…';
+    const body = {
+      aligned: collect(),
+      transpose_semitones: parseInt(document.getElementById('opt-transpose').value || '0', 10),
+      capo_fret: parseInt(document.getElementById('opt-capo').value || '0', 10),
+    };
+    const res = await fetch(`/save/${jobId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json();
+    saveResult.textContent = res.ok ? 'saved ✓' : `error: ${JSON.stringify(json)}`;
+  });
+
+  document.getElementById('btn-export').addEventListener('click', async () => {
+    saveResult.textContent = 'exporting…';
+    const opts = {
+      transpose_semitones: parseInt(document.getElementById('opt-transpose').value || '0', 10),
+      capo_fret: parseInt(document.getElementById('opt-capo').value || '0', 10),
+      prefer_flats: document.getElementById('opt-flats').checked,
+    };
+    const res = await fetch(`/export/${jobId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(opts),
+    });
+    if (!res.ok) {
+      saveResult.textContent = `export failed: ${res.status}`;
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(initial.source_file || 'song').replace(/\.[^.]+$/, '')}.docx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    saveResult.textContent = 'exported ✓';
+  });
+})();
+</script>
+</body>
+</html>

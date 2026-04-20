@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
+
+from .transpose import effective_semitones, shift_chord
 
 
-def _set_run_font(run, name: str, size_pt: int, bold: bool = False) -> None:
+def _set_font(run, name: str, size_pt: int, bold: bool = False) -> None:
     from docx.shared import Pt
 
     run.font.name = name
@@ -11,7 +14,142 @@ def _set_run_font(run, name: str, size_pt: int, bold: bool = False) -> None:
     run.bold = bold
 
 
-def export_transcription_docx(transcription: dict, output_path: Path, title: str) -> Path:
+def _set_cell_font(cell, text: str, name: str, size_pt: int, bold: bool = False) -> None:
+    cell.text = ""
+    paragraph = cell.paragraphs[0]
+    paragraph.paragraph_format.space_before = 0
+    paragraph.paragraph_format.space_after = 0
+    run = paragraph.add_run(text)
+    _set_font(run, name=name, size_pt=size_pt, bold=bold)
+
+
+def _remove_table_borders(table) -> None:
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    tbl_pr = table._element.find(qn("w:tblPr"))
+    if tbl_pr is None:
+        tbl_pr = OxmlElement("w:tblPr")
+        table._element.insert(0, tbl_pr)
+    borders = OxmlElement("w:tblBorders")
+    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        el = OxmlElement(f"w:{edge}")
+        el.set(qn("w:val"), "nil")
+        borders.append(el)
+    existing = tbl_pr.find(qn("w:tblBorders"))
+    if existing is not None:
+        tbl_pr.remove(existing)
+    tbl_pr.append(borders)
+
+
+def _write_chord_word_table(
+    document,
+    words: list[dict[str, Any]],
+    semitones: int,
+    prefer_flats: bool,
+    body_font: str,
+    chord_font: str,
+    body_size_pt: int,
+    chord_size_pt: int,
+) -> None:
+    if not words:
+        return
+    table = document.add_table(rows=2, cols=len(words))
+    table.autofit = True
+    _remove_table_borders(table)
+
+    for i, w in enumerate(words):
+        chord = w.get("chord")
+        chord_txt = shift_chord(chord, semitones, prefer_flats=prefer_flats) if chord else ""
+        _set_cell_font(
+            table.cell(0, i), chord_txt, name=chord_font, size_pt=chord_size_pt, bold=True
+        )
+        _set_cell_font(
+            table.cell(1, i), w.get("text", ""), name=body_font, size_pt=body_size_pt
+        )
+
+
+def export_aligned_chord_docx(
+    arrangement: dict[str, Any],
+    output_path: Path,
+    title: str,
+    transpose_semitones: int = 0,
+    capo_fret: int = 0,
+    prefer_flats: bool = True,
+    body_font: str = "Calibri",
+    chord_font: str = "Calibri",
+    body_size_pt: int = 11,
+    chord_size_pt: int = 11,
+) -> Path:
+    try:
+        from docx import Document
+        from docx.shared import Pt
+    except ImportError as exc:
+        raise RuntimeError("python-docx is not installed.") from exc
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    document = Document()
+
+    heading = document.add_heading(title, level=1)
+    heading.alignment = 0
+
+    semitones = effective_semitones(transpose_semitones, capo_fret)
+
+    meta = document.add_paragraph()
+    meta_run = meta.add_run(
+        f"Source: {arrangement.get('source_file', '-')}"
+        + (f"  |  Transpose: {transpose_semitones:+d}" if transpose_semitones else "")
+        + (f"  |  Capo: {capo_fret}" if capo_fret else "")
+    )
+    _set_font(meta_run, name=body_font, size_pt=10)
+    meta.paragraph_format.space_after = Pt(6)
+
+    warnings = arrangement.get("warnings", []) or []
+    if warnings:
+        warn_p = document.add_paragraph()
+        warn_h = warn_p.add_run("Notes:")
+        _set_font(warn_h, name=body_font, size_pt=10, bold=True)
+        for warning in warnings:
+            wp = document.add_paragraph()
+            _set_font(wp.add_run(f"- {warning}"), name=body_font, size_pt=10)
+
+    current_section: str | None = None
+    for line in arrangement.get("lines", []) or []:
+        section = line.get("section")
+        if section and section != current_section:
+            current_section = section
+            sh = document.add_paragraph()
+            sh.paragraph_format.space_before = Pt(10)
+            sh.paragraph_format.space_after = Pt(2)
+            _set_font(sh.add_run(f"[{section}]"), name=body_font, size_pt=12, bold=True)
+
+        words = line.get("words") or []
+        if not words:
+            text = str(line.get("lyric_line") or "").strip()
+            if text:
+                p = document.add_paragraph()
+                _set_font(p.add_run(text), name=body_font, size_pt=body_size_pt)
+            continue
+
+        _write_chord_word_table(
+            document=document,
+            words=words,
+            semitones=semitones,
+            prefer_flats=prefer_flats,
+            body_font=body_font,
+            chord_font=chord_font,
+            body_size_pt=body_size_pt,
+            chord_size_pt=chord_size_pt,
+        )
+        spacer = document.add_paragraph()
+        spacer.paragraph_format.space_after = Pt(4)
+
+    document.save(str(output_path))
+    return output_path
+
+
+def export_transcription_docx(transcription: dict[str, Any], output_path: Path, title: str) -> Path:
+    """Simple lyrics-only export used by the non-arrangement endpoint."""
     try:
         from docx import Document
     except ImportError as exc:
@@ -21,71 +159,13 @@ def export_transcription_docx(transcription: dict, output_path: Path, title: str
     document = Document()
     document.add_heading(title, level=1)
     document.add_paragraph(f"Source: {transcription.get('source_file', '-')}")
-    document.add_paragraph("")
 
     for segment in transcription.get("segments", []):
-        start = segment.get("start", 0.0)
-        text = segment.get("text", "").strip()
+        text = str(segment.get("text", "")).strip()
         if not text:
             continue
+        start = float(segment.get("start", 0.0) or 0.0)
         document.add_paragraph(f"[{start:0.2f}] {text}")
-
-    document.save(str(output_path))
-    return output_path
-
-
-def export_aligned_chord_docx(arrangement: dict, output_path: Path, title: str) -> Path:
-    try:
-        from docx import Document
-        from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
-        from docx.shared import Pt
-    except ImportError as exc:
-        raise RuntimeError("python-docx is not installed.") from exc
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    document = Document()
-    heading = document.add_heading(title, level=1)
-    heading.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
-
-    info = document.add_paragraph()
-    info_run = info.add_run("AUTO_CIFRA - Chord Sheet")
-    _set_run_font(info_run, name="Calibri", size_pt=11, bold=True)
-
-    meta = document.add_paragraph()
-    meta_run = meta.add_run(
-        f"Source: {arrangement.get('source_file', '-')} | "
-        f"Transcription mode: {arrangement.get('transcription_mode', 'real')} | "
-        f"Chord mode: {arrangement.get('chord_mode', 'real')}"
-    )
-    _set_run_font(meta_run, name="Calibri", size_pt=10, bold=False)
-    meta.paragraph_format.space_after = Pt(8)
-
-    warnings = arrangement.get("warnings", [])
-    if warnings:
-        warn_p = document.add_paragraph()
-        warn_h = warn_p.add_run("Warnings:")
-        _set_run_font(warn_h, name="Calibri", size_pt=10, bold=True)
-        for warning in warnings:
-            wp = document.add_paragraph()
-            wr = wp.add_run(f"- {warning}")
-            _set_run_font(wr, name="Calibri", size_pt=10, bold=False)
-        document.add_paragraph("")
-
-    for line in arrangement.get("lines", []):
-        chord_line = str(line.get("chord_line", "")).strip()
-        lyric_line = str(line.get("lyric_line", "")).strip()
-        if chord_line:
-            chord_p = document.add_paragraph()
-            chord_p.paragraph_format.space_before = Pt(4)
-            chord_p.paragraph_format.space_after = Pt(0)
-            chord_r = chord_p.add_run(chord_line)
-            _set_run_font(chord_r, name="Consolas", size_pt=12, bold=True)
-        if lyric_line:
-            lyric_p = document.add_paragraph()
-            lyric_p.paragraph_format.space_before = Pt(0)
-            lyric_p.paragraph_format.space_after = Pt(6)
-            lyric_r = lyric_p.add_run(lyric_line)
-            _set_run_font(lyric_r, name="Consolas", size_pt=11, bold=False)
 
     document.save(str(output_path))
     return output_path

@@ -18,12 +18,25 @@ Thumbs.db
 data/input/*
 data/output/*
 data/tmp/*
+data/jobs.sqlite
+data/jobs.sqlite-shm
+data/jobs.sqlite-wal
 !data/input/.gitkeep
 !data/output/.gitkeep
 !data/tmp/.gitkeep
+
+# Regression benchmarks — user tracks are not committed, only the README
+data/regression/*
+!data/regression/README.md
+
+# ML model cache (multi-GB — never commit)
+models/
 
 # Local downloaded tools/binaries
 tools/
 
 # Logs
 *.log
+
+# Local Claude Code permissions (personal, not shared)
+.claude/settings.local.json
