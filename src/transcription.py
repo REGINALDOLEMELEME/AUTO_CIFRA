@@ -34,13 +34,25 @@ def transcribe_audio(
     if model is None or err:
         raise RuntimeError(err or "faster-whisper is not available")
 
+    # Deterministic settings:
+    #   - temperature=0.0 and a single-temperature list force greedy decoding
+    #     (no fallback sampling pass that reintroduces randomness).
+    #   - condition_on_previous_text=False prevents an early segment-boundary
+    #     decision from cascading into a completely different segmentation on
+    #     later runs; with it enabled, faster-whisper had been producing
+    #     16 vs 7 segments across byte-identical re-runs of the same audio.
+    #   - no_speech_threshold=0.7 trims the silent pre-roll that Demucs leaves
+    #     at the head of the vocals track (otherwise Whisper invents tokens
+    #     like "Amém." from near-silence).
     segments, info = model.transcribe(
         str(normalized_audio),
         language=language,
         vad_filter=use_vad,
         word_timestamps=True,
         beam_size=5,
-        condition_on_previous_text=True,
+        temperature=[0.0],
+        condition_on_previous_text=False,
+        no_speech_threshold=0.7,
     )
 
     items: list[LyricSegment] = []
