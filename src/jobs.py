@@ -20,7 +20,10 @@ Stage = Literal[
     "ready_for_review",
     "exported",
     "error",
+    "cancelled",
 ]
+
+TERMINAL_STAGES: tuple[Stage, ...] = ("ready_for_review", "exported", "error", "cancelled")
 
 ACTIVE_STAGES: tuple[Stage, ...] = (
     "separating",
@@ -150,6 +153,25 @@ class JobRepo:
             self._conn.execute(
                 "UPDATE jobs SET heartbeat_ts=? WHERE id=?", (time.time(), job_id)
             )
+
+    def cancel(self, job_id: str, reason: str = "cancelled by user") -> bool:
+        """Mark a job as cancelled. Returns True if the job existed and was
+        in a cancellable state."""
+        now = time.time()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT stage FROM jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            if not row:
+                return False
+            if row["stage"] in TERMINAL_STAGES:
+                return False
+            self._conn.execute(
+                "UPDATE jobs SET stage='cancelled', error=?, updated_ts=?, heartbeat_ts=? "
+                "WHERE id=?",
+                (reason, now, now, job_id),
+            )
+        return True
 
     def update_transpose(
         self, job_id: str, transpose_semitones: int | None, capo_fret: int | None

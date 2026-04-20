@@ -55,6 +55,27 @@ def test_reap_stale_marks_interrupted(tmp_path: Path) -> None:
     assert got.error == "interrupted"
 
 
+def test_cancel_queued_job(tmp_path: Path) -> None:
+    repo = JobRepo(tmp_path / "jobs.sqlite")
+    j = repo.create("a.mp3")
+    repo.advance(j.id, "queued")
+    assert repo.cancel(j.id) is True
+    got = repo.get(j.id)
+    assert got.stage == "cancelled"
+    assert got.error == "cancelled by user"
+    # Cancelling an already-cancelled job returns False (idempotent guard).
+    assert repo.cancel(j.id) is False
+
+
+def test_cancel_terminal_job_refused(tmp_path: Path) -> None:
+    repo = JobRepo(tmp_path / "jobs.sqlite")
+    j = repo.create("a.mp3")
+    repo.advance(j.id, "ready_for_review", progress=1.0)
+    assert repo.cancel(j.id) is False
+    got = repo.get(j.id)
+    assert got.stage == "ready_for_review"
+
+
 def test_update_transpose_and_capo(tmp_path: Path) -> None:
     repo = JobRepo(tmp_path / "jobs.sqlite")
     j = repo.create("a.mp3")

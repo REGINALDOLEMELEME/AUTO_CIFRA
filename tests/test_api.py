@@ -57,6 +57,21 @@ def test_process_requires_existing_job(client):
     assert res.status_code == 404
 
 
+def test_cancel_queued_job(client, tmp_project):
+    wav_bytes = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x40\x1f\x00\x00\x80>\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
+    up = client.post(
+        "/upload",
+        files={"file": ("c.wav", io.BytesIO(wav_bytes), "audio/wav")},
+    ).json()
+    job_id = up["job"]["id"]
+    client.post(f"/process/{job_id}")
+    res = client.post(f"/cancel/{job_id}")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is True
+    assert body["job"]["stage"] == "cancelled"
+
+
 def test_save_then_export_round_trip(client, sample_aligned, tmp_project: Path):
     # upload → save aligned JSON (simulating review edit) → export DOCX
     wav_bytes = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x40\x1f\x00\x00\x80>\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"

@@ -15,13 +15,16 @@ logger = logging.getLogger("auto_cifra.worker")
 
 
 def _run_job_sync(job_id: str, repo: JobRepo, settings: Settings) -> None:
-    from .pipeline import run as run_pipeline
+    from .pipeline import run as run_pipeline, PipelineCancelled
 
     job = repo.get(job_id)
     if not job:
         return
     try:
         run_pipeline(job=job, repo=repo, settings=settings)
+    except PipelineCancelled:
+        logger.info("pipeline cancelled for job %s", job_id)
+        # stage is already 'cancelled' in the DB (set by the cancel endpoint)
     except Exception as exc:  # noqa: BLE001
         logger.exception("pipeline crashed for job %s", job_id)
         repo.advance(job_id, "error", error=str(exc))

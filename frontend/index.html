@@ -155,6 +155,7 @@
     <div class="actions">
       <a id="btn-review" class="btn disabled" href="#">Revisar</a>
       <a id="btn-export" class="btn btn-primary disabled" href="#">Exportar DOCX</a>
+      <button type="button" id="btn-cancel" class="btn btn-danger hidden">Cancelar</button>
       <button type="button" id="btn-new" class="btn btn-ghost">Novo áudio</button>
     </div>
   </section>
@@ -172,6 +173,7 @@
 <script>
 (function () {
   const STAGE_ORDER = ["separating", "transcribing", "aligning", "chords", "structure", "rendering"];
+  const TERMINAL_STAGES = new Set(["ready_for_review", "exported", "error", "cancelled"]);
   const PT_LABELS = {
     uploaded: "enviado",
     queued: "na fila",
@@ -184,6 +186,7 @@
     ready_for_review: "pronto para revisar",
     exported: "exportado",
     error: "erro",
+    cancelled: "cancelado",
   };
 
   const $ = (id) => document.getElementById(id);
@@ -200,6 +203,7 @@
   const eta = $("eta");
   const btnReview = $("btn-review");
   const btnExport = $("btn-export");
+  const btnCancel = $("btn-cancel");
   const btnNew = $("btn-new");
   const historyBox = $("history");
   const warningsBox = $("warnings");
@@ -244,6 +248,19 @@
     if (f) handleFile(f);
   });
   btnNew.addEventListener("click", resetAll);
+
+  btnCancel.addEventListener("click", async () => {
+    if (!currentJobId) return;
+    btnCancel.disabled = true;
+    btnCancel.textContent = "cancelando…";
+    try {
+      await fetch(`/cancel/${currentJobId}`, { method: "POST" });
+    } catch (err) {
+      // ignore — next poll will refresh state
+    }
+    btnCancel.disabled = false;
+    btnCancel.textContent = "Cancelar";
+  });
 
   async function handleFile(file) {
     resetPipeline();
@@ -325,6 +342,13 @@
     overallPct.textContent = `${Math.round(job.progress * 100)}%`;
     updateEta(job.stage, job.progress);
 
+    // Show Cancelar whenever the job is NOT in a terminal stage.
+    if (TERMINAL_STAGES.has(job.stage)) {
+      btnCancel.classList.add("hidden");
+    } else {
+      btnCancel.classList.remove("hidden");
+    }
+
     if (job.stage === "ready_for_review" || job.stage === "exported") {
       stopPolling();
       stopElapsedTimer();
@@ -338,6 +362,11 @@
       stopElapsedTimer();
       stopPhaseAnimation();
       showError(`Pipeline falhou: ${job.error || "erro desconhecido"}`);
+    } else if (job.stage === "cancelled") {
+      stopPolling();
+      stopElapsedTimer();
+      stopPhaseAnimation();
+      uploadStatus.textContent = "Pipeline cancelado.";
     }
   }
 
@@ -469,6 +498,7 @@
     btnExport.classList.add("disabled");
     btnReview.href = "#";
     btnExport.onclick = null;
+    btnCancel.classList.add("hidden");
     qsa(".phase").forEach((el) => {
       el.classList.remove("done", "active");
       el.classList.add("pending");
@@ -519,7 +549,11 @@
         .map((j) => {
           const when = new Date(j.updated_ts * 1000).toLocaleString("pt-BR");
           const stage = PT_LABELS[j.stage] || j.stage;
-          const cls = j.stage === "error" ? "error" : j.stage === "ready_for_review" || j.stage === "exported" ? "done" : "pending";
+          const cls =
+            j.stage === "error" ? "error"
+            : j.stage === "cancelled" ? "cancelled"
+            : j.stage === "ready_for_review" || j.stage === "exported" ? "done"
+            : "pending";
           const links = [];
           if (j.stage === "ready_for_review" || j.stage === "exported") {
             links.push(`<a href="/review/${j.job_id}">Revisar</a>`);

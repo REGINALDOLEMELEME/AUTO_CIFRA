@@ -81,11 +81,22 @@ async def process(job_id: str, request: Request) -> ProcessResponse:
     job = repo.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job not found")
-    if job.stage not in {"uploaded", "error", "ready_for_review", "exported"}:
+    if job.stage not in {"uploaded", "error", "cancelled", "ready_for_review", "exported"}:
         return ProcessResponse(ok=False, job=JobOut.from_row(job))
     repo.advance(job_id, "queued", progress=0.0, error=None)
     job = repo.get(job_id)
     return ProcessResponse(ok=True, job=JobOut.from_row(job))  # type: ignore[arg-type]
+
+
+@router.post("/cancel/{job_id}", response_model=ProcessResponse)
+async def cancel(job_id: str, request: Request) -> ProcessResponse:
+    repo = _repo(request)
+    job = repo.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    was_cancelled = repo.cancel(job_id)
+    job = repo.get(job_id)
+    return ProcessResponse(ok=was_cancelled, job=JobOut.from_row(job))  # type: ignore[arg-type]
 
 
 @router.get("/jobs/{job_id}", response_model=JobOut)

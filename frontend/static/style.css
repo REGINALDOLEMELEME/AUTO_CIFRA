@@ -310,6 +310,12 @@ html, body {
   background: transparent;
   color: var(--muted);
 }
+.btn-danger {
+  background: transparent;
+  color: var(--error);
+  border-color: rgba(242, 110, 110, 0.4);
+}
+.btn-danger:hover { border-color: var(--error); background: rgba(242, 110, 110, 0.08); }
 .btn-sm { padding: 0.3rem 0.7rem; font-size: 0.8rem; }
 .btn.disabled, .btn[aria-disabled="true"] {
   opacity: 0.4;
@@ -332,6 +338,7 @@ html, body {
 }
 .history-item.done { border-left: 3px solid var(--success); }
 .history-item.error { border-left: 3px solid var(--error); }
+.history-item.cancelled { border-left: 3px solid var(--warn); }
 .history-item.pending { border-left: 3px solid var(--muted); }
 .history-name { font-weight: 500; font-size: 0.92rem; }
 .history-sub {
