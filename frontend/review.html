@@ -26,10 +26,22 @@
       <label>
         <input type="checkbox" id="opt-flats" checked> Prefer flats (Bb, Eb...)
       </label>
+      <button type="button" id="btn-undo" title="Desfazer (Ctrl+Z)">Undo</button>
+      <button type="button" id="btn-redo" title="Refazer (Ctrl+Shift+Z)">Redo</button>
+      <button type="button" id="btn-reset" title="Restaurar saída original do pipeline">Reset</button>
       <button type="button" id="btn-save">Save</button>
       <button type="button" id="btn-export">Export DOCX</button>
       <a href="/" class="btn-link">Back</a>
     </form>
+
+    <audio id="audio-player" controls preload="metadata" src="/audio/{{ job.id }}"
+           class="audio-player"></audio>
+    <p class="hint">
+      Dica: clique em uma palavra para ir até aquele trecho no áudio ·
+      <kbd>Espaço</kbd> no acorde move para a próxima palavra ·
+      <kbd>Backspace</kbd> (campo vazio) move para a anterior ·
+      <kbd>Ctrl</kbd>+<kbd>Z</kbd> desfaz
+    </p>
     {% if aligned.warnings %}
     <ul class="warnings">
       {% for w in aligned.warnings %}<li>⚠ {{ w }}</li>{% endfor %}
@@ -57,6 +69,7 @@
           {% for w in line.words %}
           <input class="word"
                  data-word-index="{{ loop.index0 }}"
+                 data-word-start="{{ w.start or 0 }}"
                  value="{{ w.text }}"
                  size="{{ ((w.text or '')|length) or 2 }}">
           {% endfor %}
@@ -105,6 +118,151 @@
       lines,
     };
   }
+
+  // ---------- Snapshot / undo / redo ----------
+  // Snapshot = flat list of every chord and word input value, in DOM order.
+  // That's enough to fully reconstruct edits (timestamps are not edited here).
+  const allInputs = () => Array.from(document.querySelectorAll('#song .chord, #song .word'));
+  function snapshot() {
+    return allInputs().map((inp) => inp.value);
+  }
+  function restore(snap) {
+    const inputs = allInputs();
+    for (let i = 0; i < inputs.length && i < snap.length; i += 1) {
+      inputs[i].value = snap[i];
+      inputs[i].setAttribute('size', Math.max(2, snap[i].length));
+    }
+  }
+  const undoStack = [];
+  const redoStack = [];
+  const UNDO_LIMIT = 200;
+  function pushHistory() {
+    undoStack.push(snapshot());
+    if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+    redoStack.length = 0;
+  }
+  function undo() {
+    if (!undoStack.length) return;
+    redoStack.push(snapshot());
+    restore(undoStack.pop());
+  }
+  function redo() {
+    if (!redoStack.length) return;
+    undoStack.push(snapshot());
+    restore(redoStack.pop());
+  }
+
+  // Record a snapshot whenever the user commits an edit to any input.
+  // 'change' fires on blur/enter which is the right granularity — one
+  // history entry per discrete edit, not per keystroke.
+  document.querySelectorAll('#song .chord, #song .word').forEach((inp) => {
+    inp.addEventListener('change', pushHistory);
+  });
+
+  // ---------- Keyboard chord-move ----------
+  // On a .chord input,
+  //   - Space       → move chord to the NEXT word cell (and focus it).
+  //   - Backspace   → when the field is empty, move chord to the PREVIOUS
+  //                   word cell (and focus it). When non-empty, Backspace
+  //                   behaves normally (delete a character).
+  // Chord labels never contain spaces, so repurposing Space as "shift right"
+  // is safe and matches how the user thinks about nudging a chord over the
+  // next syllable.
+  function resize(inp) {
+    inp.setAttribute('size', Math.max(2, inp.value.length));
+  }
+  function swapChords(a, b) {
+    const av = a.value;
+    a.value = b.value;
+    b.value = av;
+    resize(a); resize(b);
+  }
+  document.querySelectorAll('#song .line').forEach((lineEl) => {
+    const chordInputs = Array.from(lineEl.querySelectorAll('.chord'));
+    chordInputs.forEach((inp, idx) => {
+      inp.addEventListener('keydown', (ev) => {
+        if (ev.key === ' ' || ev.code === 'Space') {
+          ev.preventDefault();
+          const next = chordInputs[idx + 1];
+          if (!next) return;
+          pushHistory();
+          swapChords(inp, next);
+          next.focus();
+          next.select();
+          return;
+        }
+        if (ev.key === 'Backspace' && inp.value === '') {
+          ev.preventDefault();
+          const prev = chordInputs[idx - 1];
+          if (!prev) return;
+          pushHistory();
+          swapChords(inp, prev);
+          prev.focus();
+          prev.select();
+          return;
+        }
+      });
+    });
+  });
+
+  // Ctrl+Z / Ctrl+Shift+Z anywhere in the review page.
+  document.addEventListener('keydown', (ev) => {
+    if (!(ev.ctrlKey || ev.metaKey)) return;
+    const k = ev.key.toLowerCase();
+    if (k === 'z' && !ev.shiftKey) {
+      ev.preventDefault();
+      undo();
+    } else if ((k === 'z' && ev.shiftKey) || k === 'y') {
+      ev.preventDefault();
+      redo();
+    }
+  });
+
+  document.getElementById('btn-undo').addEventListener('click', undo);
+  document.getElementById('btn-redo').addEventListener('click', redo);
+
+  // ---------- Reset-to-pipeline ----------
+  // Uses `initial` (the aligned.json that was rendered into the template), so
+  // we don't need to re-fetch from the server. Saves the current state into
+  // the undo stack first so the user can come back from a stray click.
+  document.getElementById('btn-reset').addEventListener('click', () => {
+    if (!confirm('Restaurar a saída original do pipeline?\nTodas as edições não-salvas serão desfeitas.')) return;
+    pushHistory();
+    const inputs = allInputs();
+    let cursor = 0;
+    (initial.lines || []).forEach((line) => {
+      const count = (line.words || []).length;
+      for (let i = 0; i < count; i += 1) {
+        const w = line.words[i];
+        if (cursor < inputs.length) {
+          inputs[cursor].value = w.chord || '';
+          inputs[cursor].setAttribute('size', Math.max(2, (w.chord || '').length));
+        }
+        if (cursor + count < inputs.length) {
+          inputs[cursor + count].value = w.text || '';
+          inputs[cursor + count].setAttribute('size', Math.max(2, (w.text || '').length));
+        }
+        cursor += 1;
+      }
+      cursor += count; // skip past the word-row slice we just wrote
+    });
+  });
+
+  // ---------- Audio click-to-seek ----------
+  // Each .word has data-word-start in seconds. Clicking a word seeks the
+  // player there; double-click focuses the word for editing.
+  const audio = document.getElementById('audio-player');
+  document.querySelectorAll('#song .word').forEach((inp) => {
+    inp.addEventListener('click', (ev) => {
+      // Only seek when the user clicks to FOCUS the cell; once focused,
+      // further clicks go to cursor-positioning as normal.
+      if (document.activeElement === inp) return;
+      const t = parseFloat(inp.dataset.wordStart);
+      if (!Number.isFinite(t) || !audio) return;
+      audio.currentTime = t;
+      audio.play().catch(() => { /* autoplay blocked — fine */ });
+    });
+  });
 
   const saveResult = document.getElementById('save-result');
 

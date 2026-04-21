@@ -42,6 +42,53 @@ def _remove_table_borders(table) -> None:
     tbl_pr.append(borders)
 
 
+def _split_line_on_punctuation(
+    words: list[dict[str, Any]], max_words: int = 12
+) -> list[list[dict[str, Any]]]:
+    """Split a long line into readable sub-lines. Break AFTER a word whose
+    text ends in comma/semicolon/period, preferring breaks close to the
+    midpoint when a single segment runs longer than `max_words`.
+
+    Why this exists: Whisper sometimes emits a whole verse as one segment.
+    Rendered verbatim, that becomes a 30-column chord table that no musician
+    can read. Splitting on the punctuation Whisper already inserted gives
+    us natural phrase boundaries without guessing at prosody.
+    """
+    if len(words) <= max_words:
+        return [words]
+    # Gather indices of break points (word ends with ,;.:!?).
+    break_chars = (",", ";", ".", ":", "!", "?")
+    break_idx = [
+        i for i, w in enumerate(words)
+        if str(w.get("text", "")).strip().endswith(break_chars)
+    ]
+    if not break_idx:
+        # No punctuation in a long line — hard-split every `max_words` words.
+        return [words[i:i + max_words] for i in range(0, len(words), max_words)]
+
+    # Greedy: walk through, cut after the last break that keeps the sub-line
+    # at most `max_words` long. Never emit a sub-line > max_words even if it
+    # means cutting at a non-punctuation boundary as a last resort.
+    chunks: list[list[dict[str, Any]]] = []
+    start = 0
+    while start < len(words):
+        # Candidate break points within [start, start + max_words)
+        limit = min(start + max_words, len(words))
+        candidates = [i for i in break_idx if start <= i < limit]
+        if not candidates and limit == len(words):
+            chunks.append(words[start:limit])
+            break
+        if not candidates:
+            # No punctuation in this window — hard cut at max_words - 1.
+            chunks.append(words[start:limit])
+            start = limit
+            continue
+        cut = candidates[-1] + 1  # inclusive of the punctuation word
+        chunks.append(words[start:cut])
+        start = cut
+    return [c for c in chunks if c]
+
+
 def _write_chord_word_table(
     document,
     words: list[dict[str, Any]],
@@ -131,16 +178,18 @@ def export_aligned_chord_docx(
                 _set_font(p.add_run(text), name=body_font, size_pt=body_size_pt)
             continue
 
-        _write_chord_word_table(
-            document=document,
-            words=words,
-            semitones=semitones,
-            prefer_flats=prefer_flats,
-            body_font=body_font,
-            chord_font=chord_font,
-            body_size_pt=body_size_pt,
-            chord_size_pt=chord_size_pt,
-        )
+        # Split long lines at punctuation for readability (see helper docstring).
+        for chunk in _split_line_on_punctuation(words, max_words=12):
+            _write_chord_word_table(
+                document=document,
+                words=chunk,
+                semitones=semitones,
+                prefer_flats=prefer_flats,
+                body_font=body_font,
+                chord_font=chord_font,
+                body_size_pt=body_size_pt,
+                chord_size_pt=chord_size_pt,
+            )
         spacer = document.add_paragraph()
         spacer.paragraph_format.space_after = Pt(4)
 

@@ -206,6 +206,77 @@ def normalize_chord_vocabulary(
 # -------- Beat smoothing ----------------------------------------------------
 
 
+def _is_in_key(label: str, key: str) -> bool:
+    """True when `label`'s root is diatonic to `key`. Slash basses and
+    extensions are ignored — we only check the root."""
+    if not label or not key:
+        return True
+    head = label.split("/", 1)[0]
+    parts = _split_root(head)
+    if not parts:
+        return True
+    root, _ = parts
+    return _expected_quality_for_root(key, root) is not None
+
+
+def filter_out_of_key_flickers(
+    chords: dict[str, Any],
+    key: str,
+    max_flicker_s: float = 1.6,
+) -> dict[str, Any]:
+    """Remove short out-of-key chord segments that are sandwiched between
+    in-key neighbours.
+
+    Chordino's simplechord output routinely emits 0.5–1.5 s bursts of an
+    out-of-key chord inside an otherwise diatonic progression (e.g. a stray
+    F or Dm inside a C–G–Am–F verse). Those are almost always detection
+    noise — quantising the harmonic grid smooths them out without touching
+    genuinely non-diatonic passages (those are either longer or flanked by
+    another non-diatonic chord)."""
+    if not key:
+        return chords
+    segs = list(chords.get("segments") or [])
+    if len(segs) < 3:
+        return chords
+    kept: list[dict[str, Any]] = []
+    i = 0
+    while i < len(segs):
+        cur = segs[i]
+        if i == 0 or i == len(segs) - 1:
+            kept.append(cur)
+            i += 1
+            continue
+        prev_kept = kept[-1] if kept else segs[i - 1]
+        nxt = segs[i + 1]
+        cur_label = str(cur.get("chord") or "")
+        prev_label = str(prev_kept.get("chord") or "")
+        next_label = str(nxt.get("chord") or "")
+        dur = float(cur.get("end", 0.0)) - float(cur.get("start", 0.0))
+        # Drop cur iff: short, out-of-key, and BOTH neighbours are in-key.
+        if (
+            dur <= max_flicker_s
+            and not _is_in_key(cur_label, key)
+            and _is_in_key(prev_label, key)
+            and _is_in_key(next_label, key)
+        ):
+            # Absorb cur's time into the previous kept segment so there's no
+            # gap in the chord timeline.
+            if kept:
+                kept[-1] = {**kept[-1], "end": float(cur.get("end", kept[-1]["end"]))}
+            i += 1
+            continue
+        kept.append(cur)
+        i += 1
+    # Collapse consecutive runs of the same chord the filter may have created.
+    collapsed: list[dict[str, Any]] = []
+    for seg in kept:
+        if collapsed and collapsed[-1]["chord"] == seg.get("chord"):
+            collapsed[-1] = {**collapsed[-1], "end": float(seg.get("end", collapsed[-1]["end"]))}
+        else:
+            collapsed.append(dict(seg))
+    return {**chords, "segments": collapsed}
+
+
 def smooth_to_beats(chords: dict[str, Any], beats: dict[str, Any]) -> dict[str, Any]:
     """Drop chord flickers shorter than one beat and collapse consecutive runs."""
     beat_times = beats.get("beats") or []

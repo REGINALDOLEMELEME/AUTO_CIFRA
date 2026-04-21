@@ -14,6 +14,44 @@ class _AsrCfg(BaseModel):
     device: str = "cpu"
     compute_type: str = "int8"
     language: str = "pt"
+    # initial_prompt biases Whisper's vocabulary (max 224 tokens). Keep it
+    # FREE OF PROPER NOUNS AND COUNTRY NAMES — anything specific here leaks
+    # as a hallucination when the audio is ambiguous. Learned the hard way:
+    #   - A franciscan prompt produced "Santa Clara, São Francisco" tails on
+    #     secular songs.
+    #   - A prompt containing "Brasil" produced "A CIDADE NO BRASIL" on the
+    #     whole first verse of Legião Urbana's "Será".
+    # A maximally-generic hint still helps language lock without biasing
+    # toward specific strings.
+    initial_prompt: str = "Letra de música cantada com clareza."
+    # hotwords (faster-whisper ≥ 1.0) reinforces decoder bias for rare terms.
+    # Kept EMPTY by default — we measured that a religious-only hotword list
+    # hallucinated those same terms onto secular tracks. Enable per-job from
+    # the review UI or from batch_process.py when you know the repertoire.
+    hotwords: str = ""
+    # Apply deterministic regex corrections from src/lexicon.py after ASR.
+    lexicon_correction: bool = True
+    # Tail-fallback: when the primary ASR pass on Demucs-separated vocals
+    # leaves a trailing gap longer than tail_fallback_min_gap_s, re-run
+    # Whisper on the ORIGINAL mix over that window. Recovers quiet-tail
+    # lyrics that Demucs over-suppressed (observed on 'São Francisco da
+    # Misericórdia' — final refrain was lost in the separated track).
+    tail_fallback_enabled: bool = True
+    tail_fallback_min_gap_s: float = 8.0
+    # Always probe at least this many seconds from the end of the audio when
+    # tail-fallback fires, even if Whisper claims the last word ends later.
+    # Guards against word-end timestamp stretching into silence windows.
+    tail_fallback_probe_last_s: float = 30.0
+    # Head-fallback: (superseded by gap_fallback below — kept as a config
+    # knob for backwards compatibility, no-op if gap_fallback is enabled.)
+    head_fallback_enabled: bool = False
+    head_fallback_min_gap_s: float = 8.0
+    # Gap-fallback: detect any gap between consecutive primary-pass segments
+    # longer than `gap_fallback_min_s` and re-probe that window on the
+    # ORIGINAL mix with chunked transcribe_clip. Covers head gaps (filtered
+    # intro hallucinations), mid-song gaps, and late-entry first verses.
+    gap_fallback_enabled: bool = True
+    gap_fallback_min_s: float = 8.0
 
 
 class _SeparationCfg(BaseModel):
@@ -43,6 +81,20 @@ class _ChordsCfg(BaseModel):
     # Fixes Chordino's systematic major-bias on simplechord output — e.g.
     # `A` in C major becomes `Am`. Leaves 7ths, dim, and slash chords alone.
     refine_to_key: bool = False
+    # When True, drop short out-of-key chord segments that are sandwiched
+    # between in-key neighbours (detection noise — real borrowed chords are
+    # either longer or appear in runs, so the filter leaves them alone).
+    filter_out_of_key_flickers: bool = True
+    # When True, run a second-opinion chord classifier (librosa chroma +
+    # key-biased templates) over Chordino's segments and replace Chordino's
+    # label when it is out-of-key AND the chroma's in-key candidate scores
+    # higher by at least `chroma_reclassify_margin`.
+    chroma_reclassify: bool = True
+    chroma_reclassify_margin: float = 0.05
+    # If False, the chroma classifier can override ANY Chordino label (not
+    # only out-of-key ones). Turn this on cautiously — Chordino's HMM is
+    # usually better at in-key chord disambiguation than raw templates.
+    chroma_reclassify_only_out_of_key: bool = True
 
 
 class _StructureCfg(BaseModel):

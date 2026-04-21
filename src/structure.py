@@ -8,6 +8,7 @@ Output schema:
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -37,17 +38,27 @@ def _lyric_density(start: float, end: float, lines: list[dict[str, Any]]) -> flo
 
 def _segment_fingerprint(start: float, end: float, lines: list[dict[str, Any]]) -> str:
     """Join a few words from each lyric line that overlaps the segment. Stable
-    enough to detect repeated chorus/verses across the song."""
+    enough to detect repeated chorus/verses across the song.
+
+    Accepts lines that *overlap* the segment rather than requiring full
+    containment — boundary drift from librosa's agglomerative segmenter used
+    to collapse fingerprints to empty strings, defeating refrão detection.
+    We also strip punctuation so "misericórdia," == "misericórdia" across
+    repetitions.
+    """
     chunks: list[str] = []
     for line in lines:
         s = float(line.get("start", 0.0))
         e = float(line.get("end", s))
-        if s >= start and e <= end:
+        if e >= start and s <= end:
             text = (line.get("lyric_line") or "").lower().strip()
+            text = re.sub(r"[^\w\s]", "", text, flags=re.UNICODE)
             words = text.split()
             if words:
                 chunks.append(" ".join(words[:5]))
-    return " | ".join(chunks)
+    # Limit the fingerprint to the first few lines so two refrão instances
+    # don't diverge just because one is a line longer than the other.
+    return " | ".join(chunks[:3])
 
 
 def _label_segments(
@@ -64,20 +75,49 @@ def _label_segments(
         if fp:
             counts[fp] = counts.get(fp, 0) + 1
 
+    # Also fingerprint the prefix of each segment (first ~3 words of the
+    # first contained line). This catches the refrão by its canonical opening
+    # even when librosa's boundary falls a few beats off and the full-line
+    # fingerprint drifts.
+    prefixes: list[str] = []
+    for (s, e) in segments:
+        prefix = ""
+        for line in lines:
+            ls = float(line.get("start", 0.0))
+            le = float(line.get("end", ls))
+            if le >= s and ls <= e:
+                text = (line.get("lyric_line") or "").lower().strip()
+                text = re.sub(r"[^\w\s]", "", text, flags=re.UNICODE)
+                toks = text.split()
+                if toks:
+                    prefix = " ".join(toks[:3])
+                    break
+        prefixes.append(prefix)
+    prefix_counts: dict[str, int] = {}
+    for p in prefixes:
+        if p:
+            prefix_counts[p] = prefix_counts.get(p, 0) + 1
+
     verse_idx = 0
     labels: list[dict[str, Any]] = []
     for i, (s, e) in enumerate(segments):
         fp = fingerprints[i]
+        prefix = prefixes[i]
         density = _lyric_density(s, e, lines)
         label = f"Seção {i + 1}"
         conf = 0.5
         is_last = i == len(segments) - 1
 
+        is_refrao = (
+            (fp and counts.get(fp, 1) >= 2)
+            or (prefix and prefix_counts.get(prefix, 1) >= 2)
+        )
+
         if i == 0 and density < 0.3:
             label, conf = "Intro", 0.7
         elif is_last and density < 0.3:
             label, conf = "Outro", 0.7
-        elif fp and counts.get(fp, 1) >= 2:
+        elif is_refrao:
             label, conf = "Refrão", 0.8
         elif density < 0.3 and not is_last:
             label, conf = "Solo", 0.6

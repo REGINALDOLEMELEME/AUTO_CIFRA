@@ -126,6 +126,27 @@ async def history(request: Request) -> HistoryResponse:
     return HistoryResponse(items=items)
 
 
+@router.get("/audio/{job_id}")
+async def audio(job_id: str, request: Request):
+    """Serve the separated/normalized vocals track for in-browser playback on
+    the review page. Falls back to the original upload if separation produced
+    no track (e.g. `separation.enabled = false` in settings)."""
+    job = _repo(request).get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    settings = request.app.state.settings
+    tmp = settings.tmp_dir / job_id
+    candidates = [
+        tmp / f"{Path(job.filename).stem}.vocals.norm.wav",
+        tmp / f"{Path(job.filename).stem}.vocals.wav",
+        settings.input_dir / job.filename,
+    ]
+    for p in candidates:
+        if p.exists():
+            return FileResponse(str(p), media_type="audio/wav" if p.suffix == ".wav" else "audio/mpeg")
+    raise HTTPException(status_code=404, detail="audio not available for this job")
+
+
 @router.get("/review/{job_id}", response_class=HTMLResponse)
 async def review(job_id: str, request: Request):
     job = _repo(request).get(job_id)
