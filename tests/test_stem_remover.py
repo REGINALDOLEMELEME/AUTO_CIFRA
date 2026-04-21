@@ -27,6 +27,7 @@ from src.separation_stems import (
     deterministic_output_path,
     encode_mp3,
     hash_file,
+    low_shelf,
     remix,
     slugify_filename,
 )
@@ -194,6 +195,38 @@ def test_remix_peak_normalises_instead_of_clipping():
     expected_scale = 0.99 / expected_peak
     expected_peak_sample = expected_peak * expected_scale
     assert abs(peak - expected_peak_sample) < 0.005
+
+
+def test_low_shelf_boosts_sub_bass_leaves_treble_alone():
+    """Low-shelf at 120 Hz with +6 dB must boost a 60 Hz tone ~6 dB and
+    leave a 4 kHz tone essentially unchanged (< 1 dB).
+    """
+    sr = 44100
+    dur = 0.5
+    t = np.linspace(0, dur, int(sr * dur), endpoint=False, dtype=np.float32)
+    low  = 0.2 * np.sin(2 * np.pi * 60 * t).astype(np.float32)[None, :]
+    high = 0.2 * np.sin(2 * np.pi * 4000 * t).astype(np.float32)[None, :]
+
+    def rms(x): return float(np.sqrt(np.mean(x ** 2)))
+
+    low_rms_in  = rms(low)
+    high_rms_in = rms(high)
+
+    low_out  = low_shelf(low,  sr, freq_hz=120, gain_db=6.0)
+    high_out = low_shelf(high, sr, freq_hz=120, gain_db=6.0)
+
+    low_gain_db  = 20 * np.log10(rms(low_out)  / low_rms_in  + 1e-12)
+    high_gain_db = 20 * np.log10(rms(high_out) / high_rms_in + 1e-12)
+
+    assert 5.0 < low_gain_db < 7.0,  f"60 Hz gain {low_gain_db:.2f} dB (want ~6)"
+    assert abs(high_gain_db) < 1.0,  f"4 kHz gain {high_gain_db:.2f} dB (want ~0)"
+
+
+def test_low_shelf_disabled_at_zero_db_is_noop():
+    sr = 44100
+    x = np.random.RandomState(0).randn(2, 4410).astype(np.float32) * 0.1
+    out = low_shelf(x, sr, freq_hz=120, gain_db=0.0)
+    np.testing.assert_array_equal(out, x)
 
 
 def test_remix_does_not_amplify_quiet_input():

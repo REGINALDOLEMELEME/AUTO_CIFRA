@@ -128,6 +128,15 @@ class _StemsCfg(BaseModel):
     max_bytes: int = 62_914_560        # 60 MiB
     janitor_interval_sec: int = 6 * 3600
 
+    # Demucs tends to under-represent sub-bass (< ~120 Hz) because it
+    # is conservative about bleeding kick-drum energy into the bass
+    # stem. A small low-shelf boost on the bass stem restores the
+    # perceived "weight" without reintroducing the kick. Set
+    # bass_boost_db to 0 to disable.
+    bass_boost_db: float = 4.0          # +dB at / below the corner freq
+    bass_boost_freq_hz: float = 120.0   # shelf corner
+    bass_boost_q: float = 0.707         # Butterworth-ish slope
+
 
 class _AppCfg(BaseModel):
     language: str = "pt"

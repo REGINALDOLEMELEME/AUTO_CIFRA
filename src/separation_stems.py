@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import subprocess
 import tempfile
@@ -72,6 +73,43 @@ def deterministic_output_path(
     slug = slugify_filename(Path(input_name).stem)
     removed = "-".join(sorted(remove)) or "none"
     return output_root / job_id / f"{slug}.no-{removed}.mp3"
+
+
+def low_shelf(
+    signal: np.ndarray,
+    sample_rate: int,
+    freq_hz: float,
+    gain_db: float,
+    q: float = 0.707,
+) -> np.ndarray:
+    """Apply an RBJ low-shelf biquad to ``[channels, samples]`` audio.
+
+    Returns the filtered signal at the same dtype/shape. When ``gain_db``
+    is 0 or negative, returns the input unchanged (no-op fast path).
+    """
+    if gain_db <= 0 or signal.size == 0:
+        return signal
+    # RBJ audio-EQ cookbook — low-shelf biquad
+    A = 10.0 ** (gain_db / 40.0)
+    w0 = 2.0 * math.pi * freq_hz / sample_rate
+    cos_w = math.cos(w0)
+    sin_w = math.sin(w0)
+    alpha = sin_w / (2.0 * q)
+    two_sqrtA_alpha = 2.0 * math.sqrt(A) * alpha
+
+    b0 = A * ((A + 1) - (A - 1) * cos_w + two_sqrtA_alpha)
+    b1 = 2 * A * ((A - 1) - (A + 1) * cos_w)
+    b2 = A * ((A + 1) - (A - 1) * cos_w - two_sqrtA_alpha)
+    a0 = (A + 1) + (A - 1) * cos_w + two_sqrtA_alpha
+    a1 = -2 * ((A - 1) + (A + 1) * cos_w)
+    a2 = (A + 1) + (A - 1) * cos_w - two_sqrtA_alpha
+
+    from scipy.signal import sosfilt, tf2sos
+    sos = tf2sos([b0 / a0, b1 / a0, b2 / a0], [1.0, a1 / a0, a2 / a0])
+
+    # sosfilt along the sample axis (axis=-1). Works for mono or stereo.
+    out = sosfilt(sos, signal, axis=-1).astype(signal.dtype, copy=False)
+    return out
 
 
 def remix(
@@ -287,6 +325,18 @@ def process_job(
     repo.advance(job.id, "encoding", progress=0.8)
     channels = probe_channels(input_path)
     sr = probe_sample_rate(input_path)
+
+    # Restore perceived "weight" on the bass stem — Demucs tends to
+    # under-represent sub-bass. Skipped when bass is being removed.
+    if "bass" in stems and "bass" not in set(job.remove_mask):
+        stems = dict(stems)
+        stems["bass"] = low_shelf(
+            stems["bass"], sr,
+            freq_hz=stems_cfg.bass_boost_freq_hz,
+            gain_db=stems_cfg.bass_boost_db,
+            q=stems_cfg.bass_boost_q,
+        )
+
     mix = remix(stems, set(job.remove_mask), input_was_mono=channels == 1)
     encode_mp3(mix, sr=sr, target=output_path, bitrate=job.bitrate)
 
