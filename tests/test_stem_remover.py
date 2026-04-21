@@ -361,7 +361,8 @@ def test_repo_reap_stale_marks_interrupted(tmp_path: Path):
 
 def _install_fake_stems(monkeypatch, counter: dict, synth_stems) -> None:
     def fake_extract(input_audio: Path, cache_dir: Path,
-                     model_name: str = "htdemucs_ft") -> dict:
+                     model_name: str = "htdemucs_ft",
+                     shifts: int = 1, overlap: float = 0.1) -> dict:
         counter["calls"] = counter.get("calls", 0) + 1
         return synth_stems
     monkeypatch.setattr(ss, "extract_all_stems", fake_extract)
@@ -456,8 +457,10 @@ def test_cache_miss_different_mask_reuses_stem_cache(
     # monkeypatch would copy the already-patched reference).
     real_extract = ss.extract_all_stems
 
-    def fake_extract(input_audio: Path, cache_dir: Path, model_name: str = "htdemucs_ft"):
-        # Simulate Demucs: write the 4 WAVs and return synth_stems.
+    def fake_extract(input_audio: Path, cache_dir: Path,
+                     model_name: str = "htdemucs_ft",
+                     shifts: int = 1, overlap: float = 0.1):
+        # Simulate Demucs: write the WAVs and return synth_stems.
         counter["calls"] = counter.get("calls", 0) + 1
         cache_dir.mkdir(parents=True, exist_ok=True)
         for name, arr in synth_stems.items():
@@ -694,3 +697,114 @@ def test_process_job_preserves_mono_channels(
     )
     channels = int(json.loads(probe.stdout)["streams"][0]["channels"])
     assert channels == 1  # mono input → mono output
+
+
+# ---------------------------------------------------------------------------
+# Quality presets (shifts + overlap + cache isolation)
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_preset_values():
+    """fast / balanced / best each map to documented (shifts, overlap)."""
+    from src.config import resolve_preset
+    assert resolve_preset("fast")     == (1,  0.25)
+    assert resolve_preset("balanced") == (2,  0.25)
+    assert resolve_preset("best")     == (10, 0.25)
+    # overrides win over the preset
+    assert resolve_preset("best", shifts_override=3) == (3, 0.25)
+    assert resolve_preset("fast", overlap_override=0.5) == (1, 0.5)
+
+
+def test_cache_dir_differs_across_quality_presets():
+    """Same sha + same model, different shifts or overlap → different cache dirs."""
+    from src.separation_stems import quality_cache_subdir
+    a = quality_cache_subdir("htdemucs_6s", shifts=1,  overlap=0.25)
+    b = quality_cache_subdir("htdemucs_6s", shifts=2,  overlap=0.25)
+    c = quality_cache_subdir("htdemucs_6s", shifts=10, overlap=0.25)
+    d = quality_cache_subdir("htdemucs_6s", shifts=2,  overlap=0.10)
+    assert a != b != c
+    assert b != d
+    assert a == "htdemucs_6s_s1_ov25"
+    assert c == "htdemucs_6s_s10_ov25"
+
+
+def test_apply_model_receives_shifts_and_overlap(
+    tmp_project: Path, monkeypatch, small_stereo_mp3: Path
+):
+    """process_job → extract_all_stems → apply_model is called with the
+    resolved shifts/overlap from the job's quality preset."""
+    from src.config import get_settings
+    from src.separation_stems import process_job
+
+    settings = get_settings()
+    repo = StemsJobRepo(tmp_project / "data" / "stems_jobs.sqlite")
+    sha = hash_file(small_stereo_mp3)
+    job = repo.create("sine.mp3", ("drums",), sha, 320, quality="balanced")
+    final_dir = settings.input_dir / "stems" / job.id
+    final_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy(small_stereo_mp3, final_dir / "sine.mp3")
+
+    captured: dict = {}
+
+    def fake_apply(*args, **kwargs):
+        captured["shifts"] = kwargs.get("shifts")
+        captured["overlap"] = kwargs.get("overlap")
+        import torch
+        # Return a fake sources tensor of shape [1, N_stems, 2, T].
+        waveform = args[1]  # [1, 2, T]
+        t = waveform.shape[-1]
+        return torch.zeros(1, 6, 2, t)
+
+    class _FakeModel:
+        sources = ["drums", "bass", "other", "vocals", "guitar", "piano"]
+        samplerate = 44100
+
+    import src.separation_stems as ss_mod
+    monkeypatch.setattr(
+        ss_mod, "get_demucs", lambda *a, **k: (_FakeModel(), None)
+    )
+    monkeypatch.setattr(ss_mod, "release_demucs", lambda: None)
+
+    import demucs.apply as demucs_apply
+    monkeypatch.setattr(demucs_apply, "apply_model", fake_apply)
+
+    process_job(job, repo, settings)
+
+    # "balanced" → shifts=2, overlap=0.25.
+    assert captured["shifts"] == 2
+    assert abs(captured["overlap"] - 0.25) < 1e-9
+
+
+def test_quality_preset_roundtrips_to_job(client, tmp_path: Path):
+    """POST /stems with quality=balanced → Job row has quality='balanced'."""
+    wav = tmp_path / "a.wav"
+    _write_sine_wav(wav, dur_s=0.5)
+    r = client.post(
+        "/stems",
+        files={"file": ("a.wav", wav.read_bytes(), "audio/wav")},
+        data={"remove_drums": "on", "quality": "balanced"},
+    )
+    assert r.status_code in (200, 303)
+    # Find the created job by listing recent ones
+    from src.stems_jobs import StemsJobRepo
+    from src.config import get_settings
+    settings = get_settings()
+    repo = StemsJobRepo(settings.project_root / "data" / "stems_jobs.sqlite")
+    recent = repo.list_recent(limit=5)
+    assert recent, "expected at least one job"
+    assert recent[0].quality == "balanced"
+    repo.close()
+
+
+def test_post_invalid_quality_rejected(client, tmp_path: Path):
+    """POST /stems with an unknown quality → 422."""
+    wav = tmp_path / "a.wav"
+    _write_sine_wav(wav, dur_s=0.5)
+    r = client.post(
+        "/stems",
+        files={"file": ("a.wav", wav.read_bytes(), "audio/wav")},
+        data={"remove_drums": "on", "quality": "ultra_duper"},
+    )
+    assert r.status_code == 422
+    assert "ultra_duper" in r.json()["detail"].lower() or \
+           "unknown" in r.json()["detail"].lower()

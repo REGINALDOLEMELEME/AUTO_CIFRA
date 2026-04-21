@@ -43,6 +43,7 @@ class StemsJob:
     created_ts: float
     updated_ts: float
     heartbeat_ts: float
+    quality: str = "best"
 
 
 _SCHEMA = """
@@ -58,7 +59,8 @@ CREATE TABLE IF NOT EXISTS stems_jobs (
     error TEXT,
     created_ts REAL NOT NULL,
     updated_ts REAL NOT NULL,
-    heartbeat_ts REAL NOT NULL
+    heartbeat_ts REAL NOT NULL,
+    quality TEXT NOT NULL DEFAULT 'best'
 );
 CREATE INDEX IF NOT EXISTS idx_stems_stage ON stems_jobs(stage);
 CREATE INDEX IF NOT EXISTS idx_stems_updated ON stems_jobs(updated_ts DESC);
@@ -66,7 +68,15 @@ CREATE INDEX IF NOT EXISTS idx_stems_sha ON stems_jobs(input_sha256);
 """
 
 
+def _ensure_quality_column(conn: sqlite3.Connection) -> None:
+    """Backfill the quality column on pre-existing DBs (SQLite ALTER is idempotent-safe via try/except)."""
+    cols = [row["name"] for row in conn.execute("PRAGMA table_info(stems_jobs)").fetchall()]
+    if "quality" not in cols:
+        conn.execute("ALTER TABLE stems_jobs ADD COLUMN quality TEXT NOT NULL DEFAULT 'best'")
+
+
 def _row_to_job(row: sqlite3.Row) -> StemsJob:
+    keys = row.keys()
     return StemsJob(
         id=row["id"],
         filename=row["filename"],
@@ -80,6 +90,7 @@ def _row_to_job(row: sqlite3.Row) -> StemsJob:
         created_ts=row["created_ts"],
         updated_ts=row["updated_ts"],
         heartbeat_ts=row["heartbeat_ts"],
+        quality=row["quality"] if "quality" in keys else "best",
     )
 
 
@@ -95,6 +106,7 @@ class StemsJobRepo:
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.execute("PRAGMA synchronous=NORMAL;")
         self._conn.executescript(_SCHEMA)
+        _ensure_quality_column(self._conn)
 
     def create(
         self,
@@ -102,6 +114,7 @@ class StemsJobRepo:
         remove_mask: tuple[str, ...],
         input_sha256: str,
         bitrate: int,
+        quality: str = "best",
     ) -> StemsJob:
         now = time.time()
         job_id = uuid.uuid4().hex[:12]
@@ -109,8 +122,9 @@ class StemsJobRepo:
             self._conn.execute(
                 "INSERT INTO stems_jobs("
                 "id, filename, stage, progress, remove_mask, input_sha256, "
-                "bitrate, output_path, error, created_ts, updated_ts, heartbeat_ts"
-                ") VALUES (?, ?, 'uploaded', 0.0, ?, ?, ?, NULL, NULL, ?, ?, ?)",
+                "bitrate, output_path, error, created_ts, updated_ts, "
+                "heartbeat_ts, quality"
+                ") VALUES (?, ?, 'uploaded', 0.0, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)",
                 (
                     job_id,
                     filename,
@@ -120,6 +134,7 @@ class StemsJobRepo:
                     now,
                     now,
                     now,
+                    quality,
                 ),
             )
         return self.get(job_id)  # type: ignore[return-value]

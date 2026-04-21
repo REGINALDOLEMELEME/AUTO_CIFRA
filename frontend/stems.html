@@ -421,6 +421,23 @@
             {% endfor %}
           </div>
         </fieldset>
+        <fieldset>
+          <legend>Quality</legend>
+          <div class="chips">
+            {% for preset in quality_presets %}
+              <label class="chip">
+                <input type="radio" name="quality" value="{{ preset }}"
+                  {% if preset == default_quality %}checked{% endif %}>
+                <span class="dot"></span>{{ preset }}
+              </label>
+            {% endfor %}
+          </div>
+          <p class="help" style="margin-top:.75rem">
+            <strong>fast</strong>: ~1.3× time · cleaner seams ·
+            <strong>balanced</strong>: ~2.6× time · less sustain wobble ·
+            <strong>best</strong>: ~13× time · top free-local quality
+          </p>
+        </fieldset>
         <button class="btn" type="submit">Process track →</button>
       </form>
     {% else %}
@@ -433,6 +450,10 @@
         <div class="meta-row">
           <span class="meta-label">Removing</span>
           <code>{{ job.remove_mask | join(", ") }}</code>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Quality</span>
+          <code>{{ job.quality }}</code>
         </div>
         <div class="meta-row">
           <span class="meta-label">Job&nbsp;ID</span>

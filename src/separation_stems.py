@@ -21,7 +21,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from .config import Settings
+from .config import Settings, resolve_preset
 from .models import get_demucs, release_demucs
 from .stems_jobs import StemsJob, StemsJobRepo
 
@@ -61,10 +61,24 @@ def slugify_filename(stem: str) -> str:
 
 
 def compute_cache_key(
-    sha: str, remove: tuple[str, ...], model: str, bitrate: int
+    sha: str,
+    remove: tuple[str, ...],
+    model: str,
+    bitrate: int,
+    shifts: int = 1,
+    overlap: float = 0.1,
 ) -> str:
     mask = "-".join(sorted(remove)) or "none"
-    return f"{sha}|{mask}|{model}|{bitrate}"
+    return f"{sha}|{mask}|{model}|{bitrate}|s{shifts}|ov{int(overlap * 100)}"
+
+
+def quality_cache_subdir(model: str, shifts: int, overlap: float) -> str:
+    """Disk directory name for the per-quality stem cache.
+
+    Used as the first path segment under ``data/stems_cache/`` so stems from
+    different quality presets coexist on disk and don't pollute each other.
+    """
+    return f"{model}_s{shifts}_ov{int(overlap * 100)}"
 
 
 def deterministic_output_path(
@@ -222,12 +236,19 @@ def probe_duration_sec(path: Path) -> float | None:
 
 
 def extract_all_stems(
-    input_audio: Path, cache_dir: Path, model_name: str = "htdemucs_ft"
+    input_audio: Path,
+    cache_dir: Path,
+    model_name: str = "htdemucs_ft",
+    shifts: int = 1,
+    overlap: float = 0.1,
 ) -> dict[str, np.ndarray]:
-    """Return ``{name: [channels, samples] float32}`` for all 4 stems.
+    """Return ``{name: [channels, samples] float32}`` for all stems.
 
-    Reads from ``cache_dir/{name}.wav`` when all 4 exist; otherwise runs
-    Demucs and writes them for next time.
+    Reads from ``cache_dir/{name}.wav`` when all expected WAVs exist;
+    otherwise runs Demucs with the given ``shifts``/``overlap`` and writes
+    the full stem set for next time. The caller is responsible for
+    supplying a cache_dir that incorporates ``model_name``/``shifts``/
+    ``overlap`` so stems from different quality presets never collide.
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
     wavs = {n: cache_dir / f"{n}.wav" for n in STEM_NAMES}
@@ -277,7 +298,8 @@ def extract_all_stems(
                 device="cpu",
                 progress=False,
                 split=True,
-                overlap=0.1,
+                shifts=max(1, int(shifts)),
+                overlap=float(overlap),
             )
 
         out: dict[str, np.ndarray] = {}
@@ -307,7 +329,15 @@ def process_job(
     """End-to-end: separate (or cache-hit) → remix → encode MP3 → advance to ready."""
     stems_cfg = settings.stems
     input_path = settings.input_dir / "stems" / job.id / job.filename
-    cache_dir = settings.project_root / "data" / "stems_cache" / job.input_sha256
+    job_quality = getattr(job, "quality", None) or stems_cfg.quality
+    shifts, overlap = resolve_preset(
+        job_quality, stems_cfg.shifts, stems_cfg.overlap
+    )
+    cache_subdir = quality_cache_subdir(stems_cfg.model, shifts, overlap)
+    cache_dir = (
+        settings.project_root / "data" / "stems_cache"
+        / cache_subdir / job.input_sha256
+    )
     output_root = settings.project_root / "data" / "output" / "stems"
     output_path = deterministic_output_path(
         output_root, job.id, job.filename, job.remove_mask
@@ -320,7 +350,9 @@ def process_job(
         return
 
     repo.advance(job.id, "separating", progress=0.2)
-    stems = extract_all_stems(input_path, cache_dir, stems_cfg.model)
+    stems = extract_all_stems(
+        input_path, cache_dir, stems_cfg.model, shifts=shifts, overlap=overlap
+    )
 
     repo.advance(job.id, "encoding", progress=0.8)
     channels = probe_channels(input_path)

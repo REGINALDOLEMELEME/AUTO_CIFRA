@@ -20,7 +20,7 @@ from fastapi.responses import (
 )
 from fastapi.templating import Jinja2Templates
 
-from app.api.stems_schemas import ALLOWED_EXTS, STEMS_ALL, StemsJobOut
+from app.api.stems_schemas import ALLOWED_EXTS, QUALITY_PRESETS, STEMS_ALL, StemsJobOut
 from src.separation_stems import hash_file, probe_duration_sec
 from src.stems_jobs import StemsJobRepo
 
@@ -47,9 +47,16 @@ def _max_dur(request: Request) -> int:
 
 @router.get("", response_class=HTMLResponse)
 async def stems_form(request: Request):
+    default_quality = request.app.state.settings.stems.quality
     return _templates(request).TemplateResponse(
         "stems.html",
-        {"request": request, "job": None, "stems_all": STEMS_ALL},
+        {
+            "request": request,
+            "job": None,
+            "stems_all": STEMS_ALL,
+            "quality_presets": QUALITY_PRESETS,
+            "default_quality": default_quality,
+        },
     )
 
 
@@ -63,6 +70,7 @@ async def stems_submit(
     remove_other: str | None = Form(None),
     remove_guitar: str | None = Form(None),
     remove_piano: str | None = Form(None),
+    quality: str | None = Form(None),
 ):
     mask = tuple(
         sorted(
@@ -86,6 +94,17 @@ async def stems_submit(
         raise HTTPException(
             status_code=422,
             detail="You've asked for silence. Uncheck at least one.",
+        )
+
+    settings_stems = request.app.state.settings.stems
+    resolved_quality = quality or settings_stems.quality
+    if resolved_quality not in QUALITY_PRESETS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Unknown quality '{resolved_quality}'. "
+                f"Must be one of: {', '.join(QUALITY_PRESETS)}."
+            ),
         )
 
     safe_name = Path(file.filename or "").name
@@ -145,6 +164,7 @@ async def stems_submit(
             remove_mask=mask,
             input_sha256=sha,
             bitrate=bitrate,
+            quality=resolved_quality,
         )
 
         # Move file into the job's final dir.
@@ -175,7 +195,13 @@ async def stems_status(request: Request, job_id: str):
 
     return _templates(request).TemplateResponse(
         "stems.html",
-        {"request": request, "job": job, "stems_all": STEMS_ALL},
+        {
+            "request": request,
+            "job": job,
+            "stems_all": STEMS_ALL,
+            "quality_presets": QUALITY_PRESETS,
+            "default_quality": request.app.state.settings.stems.quality,
+        },
     )
 
 

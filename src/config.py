@@ -3,10 +3,35 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field
+
+QualityPreset = Literal["fast", "balanced", "best"]
+QUALITY_PRESETS: tuple[QualityPreset, ...] = ("fast", "balanced", "best")
+
+# (shifts, overlap) for each preset. Values chosen from Demucs' apply_model
+# contract in AUTO_CIFRA/.venv/Lib/site-packages/demucs/apply.py:132-158 —
+# higher `shifts` = linear runtime but +0.2 dB SDR each; overlap=0.25 reduces
+# chunk-boundary artefacts for +33% runtime.
+_QUALITY_PRESETS: dict[QualityPreset, tuple[int, float]] = {
+    "fast":     (1,  0.25),
+    "balanced": (2,  0.25),
+    "best":     (10, 0.25),
+}
+
+
+def resolve_preset(
+    quality: QualityPreset,
+    shifts_override: int | None = None,
+    overlap_override: float | None = None,
+) -> tuple[int, float]:
+    """Return (shifts, overlap) for a named quality preset, with per-field overrides."""
+    default_shifts, default_overlap = _QUALITY_PRESETS[quality]
+    shifts = default_shifts if shifts_override is None else int(shifts_override)
+    overlap = default_overlap if overlap_override is None else float(overlap_override)
+    return shifts, overlap
 
 
 class _AsrCfg(BaseModel):
@@ -136,6 +161,15 @@ class _StemsCfg(BaseModel):
     bass_boost_db: float = 4.0          # +dB at / below the corner freq
     bass_boost_freq_hz: float = 120.0   # shelf corner
     bass_boost_q: float = 0.707         # Butterworth-ish slope
+
+    # Separation quality preset — trades CPU time for audible fidelity.
+    # `fast` (shifts=1 overlap=0.25)   — ~1.3× today's runtime
+    # `balanced` (shifts=2 overlap=0.25) — ~2.6× today's runtime
+    # `best` (shifts=10 overlap=0.25)  — ~13× today's runtime; best CPU quality
+    # Power-users can pin `shifts`/`overlap` directly to override the preset.
+    quality: QualityPreset = "best"
+    shifts: int | None = None
+    overlap: float | None = None
 
 
 class _AppCfg(BaseModel):
