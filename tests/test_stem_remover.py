@@ -178,15 +178,34 @@ def test_remix_drops_removed_stems(synth_stems):
     np.testing.assert_allclose(mix, expected, rtol=1e-4, atol=1e-5)
 
 
-def test_remix_clips_to_unit_range():
-    # 4 stems of 0.5 amplitude sum to 2.0; must clip to 1.0.
+def test_remix_peak_normalises_instead_of_clipping():
+    # 6 stems at 0.5 amplitude sum to 3.0; must be scaled down (not clipped)
+    # so peak ≈ 0.99 and dynamics are preserved (output shape still sinusoidal).
     sr = 44100
     t = np.linspace(0, 0.1, int(sr * 0.1), endpoint=False, dtype=np.float32)
     x = np.sin(2 * np.pi * 440 * t).astype(np.float32)
     stems = {n: np.stack([0.5 * x] * 2) for n in STEM_NAMES}
     mix = remix(stems, remove=set(), input_was_mono=False)
-    assert mix.max() <= 1.0 + 1e-6
-    assert mix.min() >= -1.0 - 1e-6
+    peak = float(np.max(np.abs(mix)))
+    # Peak is close to headroom (0.99) — not hard-clipped at 1.0.
+    assert 0.98 <= peak <= 0.991
+    # Preserve waveform shape (scaled sine is still sinusoidal within tolerance).
+    expected_peak = 3.0 * 0.5  # 6 stems × 0.5
+    expected_scale = 0.99 / expected_peak
+    expected_peak_sample = expected_peak * expected_scale
+    assert abs(peak - expected_peak_sample) < 0.005
+
+
+def test_remix_does_not_amplify_quiet_input():
+    # Sum below the headroom threshold must be returned UNSCALED —
+    # we normalise down, we don't normalise up.
+    sr = 44100
+    t = np.linspace(0, 0.1, int(sr * 0.1), endpoint=False, dtype=np.float32)
+    x = 0.1 * np.sin(2 * np.pi * 440 * t).astype(np.float32)
+    stems = {n: np.stack([x] * 2) for n in ("drums", "bass")}
+    mix = remix(stems, remove=set(), input_was_mono=False)
+    expected = 2 * x  # sum, no scaling
+    np.testing.assert_allclose(mix[0], expected, rtol=1e-5, atol=1e-6)
 
 
 def test_remix_mono_downmix(synth_stems):

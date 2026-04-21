@@ -78,8 +78,16 @@ def remix(
     stems: dict[str, np.ndarray],
     remove: set[str],
     input_was_mono: bool,
+    headroom: float = 0.99,
 ) -> np.ndarray:
-    """Sum kept stems, clip to [-1, 1], optionally downmix to mono.
+    """Sum kept stems, peak-normalise if they'd clip, optionally downmix to mono.
+
+    Summing stems from a mastered track routinely yields peaks > 1.0.
+    Hard-clipping at ±1.0 destroys transient info and sounds like digital
+    distortion (the classic "muddy bass / crunchy guitar" artefact).
+    Instead, if the summed peak exceeds ``headroom`` we scale the whole
+    mix down proportionally — dynamics are preserved, only the overall
+    level drops.
 
     Arrays are ``[channels, samples]`` float32. Returns same shape with
     ``channels=1`` when ``input_was_mono`` else 2.
@@ -89,7 +97,11 @@ def remix(
         # Caller should have validated; defensive only.
         raise StemRemoverError("All stems removed — refusing to output silence.")
     mix = np.sum(np.stack(kept, axis=0), axis=0)
-    mix = np.clip(mix, -1.0, 1.0)
+
+    peak = float(np.max(np.abs(mix)))
+    if peak > headroom:
+        mix = mix * (headroom / peak)
+
     if input_was_mono:
         mix = mix.mean(axis=0, keepdims=True)
     return mix.astype(np.float32)
