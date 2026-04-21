@@ -67,7 +67,10 @@ def _encode_mp3_from_wav(wav: Path, mp3: Path, bitrate: int = 128,
 
 @pytest.fixture
 def synth_stems() -> dict[str, np.ndarray]:
-    """4 synthetic stems [2 channels, 1 s] at distinct amplitudes."""
+    """6 synthetic stems [2 channels, 1 s] at distinct amplitudes.
+
+    Matches htdemucs_6s: drums, bass, vocals, other, guitar, piano.
+    """
     sr = 44100
     t = np.linspace(0.0, 1.0, sr, endpoint=False, dtype=np.float32)
     base = np.sin(2 * np.pi * 440.0 * t).astype(np.float32)
@@ -76,6 +79,8 @@ def synth_stems() -> dict[str, np.ndarray]:
         "bass":   np.stack([0.20 * base] * 2),
         "vocals": np.stack([0.30 * base] * 2),
         "other":  np.stack([0.05 * base] * 2),
+        "guitar": np.stack([0.15 * base] * 2),
+        "piano":  np.stack([0.08 * base] * 2),
     }
 
 
@@ -505,15 +510,15 @@ def test_post_stems_zero_stems_rejected(client, tmp_path: Path):
     assert "at least one" in r.json()["detail"].lower()
 
 
-def test_post_stems_all_four_rejected(client, tmp_path: Path):
-    """AT-006."""
+def test_post_stems_all_stems_rejected(client, tmp_path: Path):
+    """AT-006 — selecting every possible stem is silence, reject."""
+    from app.api.stems_schemas import STEMS_ALL
     wav = tmp_path / "a.wav"
     _write_sine_wav(wav, dur_s=0.5)
     r = client.post(
         "/stems",
         files={"file": ("a.wav", wav.read_bytes(), "audio/wav")},
-        data={"remove_drums": "on", "remove_bass": "on",
-              "remove_vocals": "on", "remove_other": "on"},
+        data={f"remove_{name}": "on" for name in STEMS_ALL},
     )
     assert r.status_code == 422
     assert "silence" in r.json()["detail"].lower()

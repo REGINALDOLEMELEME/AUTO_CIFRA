@@ -4,7 +4,9 @@ from pydantic import BaseModel
 
 from src.stems_jobs import StemsJob, StemsStage
 
-STEMS_ALL: tuple[str, ...] = ("drums", "bass", "vocals", "other")
+STEMS_ALL: tuple[str, ...] = (
+    "drums", "bass", "vocals", "other", "guitar", "piano",
+)
 ALLOWED_EXTS: set[str] = {".mp3", ".wav", ".m4a", ".flac", ".ogg"}
 
 

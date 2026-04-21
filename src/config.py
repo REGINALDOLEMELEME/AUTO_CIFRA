@@ -117,7 +117,11 @@ class _WorkerCfg(BaseModel):
 
 
 class _StemsCfg(BaseModel):
-    model: str = "htdemucs_ft"
+    # htdemucs_6s produces {drums, bass, vocals, other, guitar, piano} —
+    # guitar gets its own stem instead of being mixed into `other`,
+    # which noticeably improves guitar clarity when drums are removed.
+    # Use "htdemucs_ft" for the faster (but 4-stem only) fine-tuned model.
+    model: str = "htdemucs_6s"
     mp3_bitrate: int = 320
     cache_ttl_hours: int = 24
     max_duration_sec: int = 1200       # 20 min

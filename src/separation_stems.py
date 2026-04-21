@@ -24,7 +24,9 @@ from .config import Settings
 from .models import get_demucs, release_demucs
 from .stems_jobs import StemsJob, StemsJobRepo
 
-STEM_NAMES: tuple[str, ...] = ("drums", "bass", "vocals", "other")
+STEM_NAMES: tuple[str, ...] = (
+    "drums", "bass", "vocals", "other", "guitar", "piano",
+)
 
 
 class StemRemoverError(Exception):

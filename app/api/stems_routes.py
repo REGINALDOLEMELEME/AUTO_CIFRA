@@ -61,6 +61,8 @@ async def stems_submit(
     remove_bass: str | None = Form(None),
     remove_vocals: str | None = Form(None),
     remove_other: str | None = Form(None),
+    remove_guitar: str | None = Form(None),
+    remove_piano: str | None = Form(None),
 ):
     mask = tuple(
         sorted(
@@ -70,6 +72,8 @@ async def stems_submit(
                 ("bass", remove_bass),
                 ("vocals", remove_vocals),
                 ("other", remove_other),
+                ("guitar", remove_guitar),
+                ("piano", remove_piano),
             )
             if val
         )
@@ -78,7 +82,7 @@ async def stems_submit(
         raise HTTPException(
             status_code=422, detail="Pick at least one stem to remove."
         )
-    if len(mask) == 4:
+    if len(mask) == len(STEMS_ALL):
         raise HTTPException(
             status_code=422,
             detail="You've asked for silence. Uncheck at least one.",
