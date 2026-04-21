@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AUTO_CIFRA — Stem Remover</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-0: #0b0f1a;
+      --bg-1: #121826;
+      --bg-2: #1a2234;
+      --border: rgba(255, 255, 255, .08);
+      --text: #e6eaf2;
+      --text-muted: #8a94a8;
+      --accent: #7c5cff;
+      --accent-2: #00d4ff;
+      --accent-hover: #6a47ff;
+      --success: #22c55e;
+      --success-hover: #16a34a;
+      --danger: #f87171;
+      --warn: #fbbf24;
+      --radius-sm: 8px;
+      --radius: 14px;
+      --radius-lg: 20px;
+      --shadow: 0 20px 50px -20px rgba(0, 0, 0, .6);
+      --glow: 0 0 0 3px rgba(124, 92, 255, .18);
+    }
+
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg-0: #f6f7fb;
+        --bg-1: #ffffff;
+        --bg-2: #f0f2f8;
+        --border: rgba(15, 23, 42, .08);
+        --text: #0f172a;
+        --text-muted: #475569;
+        --shadow: 0 20px 50px -20px rgba(15, 23, 42, .18);
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      font-family: "Inter", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      color: var(--text);
+      background:
+        radial-gradient(1200px 600px at 10% -10%, rgba(124, 92, 255, .28), transparent 60%),
+        radial-gradient(900px 500px at 110% 10%, rgba(0, 212, 255, .22), transparent 55%),
+        var(--bg-0);
+      background-attachment: fixed;
+    }
+
+    main {
+      max-width: 640px;
+      margin: min(8vh, 4rem) auto 4rem;
+      padding: 2.25rem 2rem;
+      background: linear-gradient(180deg, var(--bg-1), var(--bg-2));
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(20px);
+    }
+
+    .brand {
+      display: flex; align-items: center; gap: .6rem;
+      font-size: .78rem; letter-spacing: .18em; text-transform: uppercase;
+      color: var(--text-muted); margin-bottom: 1.25rem;
+    }
+    .brand::before {
+      content: "";
+      width: 10px; height: 10px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      box-shadow: 0 0 12px rgba(124, 92, 255, .7);
+    }
+
+    h1 {
+      margin: 0 0 .75rem;
+      font-size: clamp(1.6rem, 1.2rem + 1.2vw, 2.1rem);
+      font-weight: 700;
+      letter-spacing: -.02em;
+      background: linear-gradient(90deg, var(--text) 0%, var(--accent-2) 120%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    p { line-height: 1.55; }
+    .help { color: var(--text-muted); font-size: .92rem; margin: .4rem 0; }
+    strong { color: var(--text); }
+
+    code {
+      background: rgba(124, 92, 255, .12);
+      color: var(--accent-2);
+      padding: .08rem .4rem;
+      border-radius: 6px;
+      font-size: .9em;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    form { margin-top: 1.5rem; }
+
+    .file-field {
+      position: relative;
+      display: block;
+      width: 100%;
+      min-height: 120px;
+      border: 1.5px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 1.6rem 1.25rem;
+      text-align: center;
+      background: rgba(255, 255, 255, .02);
+      transition: border-color .18s, background .18s;
+      cursor: pointer;
+      overflow: hidden;
+    }
+    .file-field:hover,
+    .file-field:focus-within {
+      border-color: var(--accent);
+      background: rgba(124, 92, 255, .06);
+    }
+    .file-field input[type=file] {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      opacity: 0; cursor: pointer;
+      font-size: 0;
+      z-index: 2;
+    }
+    .file-field .icon {
+      display: block;
+      font-size: 1.75rem;
+      line-height: 1;
+      margin-bottom: .55rem;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .file-field .title {
+      display: block;
+      font-weight: 600;
+      font-size: 1rem;
+      color: var(--text);
+      word-break: break-word;
+    }
+    .file-field .sub {
+      display: block;
+      color: var(--text-muted);
+      font-size: .82rem;
+      margin-top: .35rem;
+    }
+
+    fieldset {
+      margin: 1.5rem 0;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.2rem 1.1rem;
+      background: rgba(255, 255, 255, .02);
+    }
+    legend {
+      padding: 0 .5rem;
+      color: var(--text-muted);
+      font-weight: 600;
+      font-size: .85rem;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+
+    .chips { display: flex; flex-wrap: wrap; gap: .55rem; }
+    .chip {
+      display: inline-flex; align-items: center; gap: .45rem;
+      padding: .55rem .9rem;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, .02);
+      color: var(--text-muted);
+      font-size: .92rem;
+      cursor: pointer;
+      user-select: none;
+      transition: all .18s ease;
+    }
+    .chip input {
+      position: absolute; opacity: 0; pointer-events: none;
+    }
+    .chip .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--border);
+      transition: background .18s, box-shadow .18s;
+    }
+    .chip:hover {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+    .chip:has(input:checked) {
+      color: #fff;
+      border-color: transparent;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      box-shadow: 0 6px 18px -6px rgba(124, 92, 255, .6);
+    }
+    .chip:has(input:checked) .dot {
+      background: #fff;
+      box-shadow: 0 0 0 3px rgba(255, 255, 255, .25);
+    }
+    .chip:has(input:focus-visible) { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: .5rem;
+      padding: .85rem 1.5rem;
+      font: inherit; font-weight: 600;
+      color: #fff;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      border: 0;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: transform .12s ease, box-shadow .2s ease, filter .2s ease;
+      box-shadow: 0 10px 24px -10px rgba(124, 92, 255, .7);
+    }
+    .btn:hover { transform: translateY(-1px); filter: brightness(1.05); }
+    .btn:active { transform: translateY(0); }
+    .btn:focus-visible { outline: none; box-shadow: var(--glow), 0 10px 24px -10px rgba(124, 92, 255, .7); }
+
+    .btn-success {
+      background: linear-gradient(135deg, var(--success), #34d399);
+      box-shadow: 0 10px 24px -10px rgba(34, 197, 94, .6);
+    }
+
+    .state {
+      display: flex; align-items: center; gap: .75rem;
+      padding: .9rem 1.1rem;
+      margin: 1.25rem 0;
+      border-radius: var(--radius);
+      background: rgba(124, 92, 255, .08);
+      border: 1px solid rgba(124, 92, 255, .18);
+      font-weight: 500;
+    }
+    .state::before {
+      content: "";
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 6px rgba(124, 92, 255, .18);
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+    .state.ready { background: rgba(34, 197, 94, .10); border-color: rgba(34, 197, 94, .25); }
+    .state.ready::before { background: var(--success); box-shadow: 0 0 0 6px rgba(34, 197, 94, .18); animation: none; }
+    .state.error, .state.cancelled {
+      background: rgba(248, 113, 113, .10); border-color: rgba(248, 113, 113, .25);
+    }
+    .state.error::before, .state.cancelled::before {
+      background: var(--danger); box-shadow: 0 0 0 6px rgba(248, 113, 113, .18); animation: none;
+    }
+    .state small { display: block; color: var(--text-muted); font-weight: 400; margin-top: .2rem; }
+
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 6px rgba(124, 92, 255, .18); transform: scale(1); }
+      50%      { box-shadow: 0 0 0 10px rgba(124, 92, 255, .08); transform: scale(1.05); }
+    }
+
+    /* ---- Progress bar + stepper -------------------------------------- */
+    .progress {
+      margin: 1rem 0 1.25rem;
+    }
+    .bar {
+      position: relative;
+      width: 100%;
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, .06);
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .bar-fill {
+      position: absolute; top: 0; left: 0; bottom: 0;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      border-radius: 999px;
+      transition: width .6s ease;
+    }
+    .bar.active .bar-fill::after {
+      content: "";
+      position: absolute; top: 0; right: 0; bottom: 0;
+      width: 40%;
+      background: linear-gradient(90deg,
+        transparent,
+        rgba(255, 255, 255, .45),
+        transparent);
+      animation: shimmer 1.4s linear infinite;
+    }
+    .bar.error .bar-fill { background: linear-gradient(90deg, var(--danger), #fb7185); }
+    .bar.ready .bar-fill { background: linear-gradient(90deg, var(--success), #34d399); }
+
+    @keyframes shimmer {
+      from { transform: translateX(-100%); }
+      to   { transform: translateX(250%); }
+    }
+
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: .4rem;
+      margin-top: .9rem;
+    }
+    .step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: .35rem;
+      text-align: center;
+    }
+    .step-dot {
+      width: 22px; height: 22px; border-radius: 50%;
+      background: var(--bg-2);
+      border: 1.5px solid var(--border);
+      display: grid; place-items: center;
+      color: var(--text-muted);
+      font-size: .72rem; font-weight: 700;
+      transition: all .25s ease;
+    }
+    .step-label {
+      font-size: .72rem;
+      letter-spacing: .05em;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+    .step.done .step-dot {
+      background: linear-gradient(135deg, var(--success), #34d399);
+      border-color: transparent;
+      color: #fff;
+    }
+    .step.done .step-label { color: var(--text); }
+    .step.active .step-dot {
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      border-color: transparent;
+      color: #fff;
+      box-shadow: 0 0 0 5px rgba(124, 92, 255, .18);
+      animation: step-pulse 1.4s ease-in-out infinite;
+    }
+    .step.active .step-label { color: var(--text); font-weight: 600; }
+    .step.error .step-dot {
+      background: linear-gradient(135deg, var(--danger), #fb7185);
+      border-color: transparent; color: #fff;
+      animation: none;
+    }
+    .step.error .step-label { color: var(--danger); }
+
+    @keyframes step-pulse {
+      0%, 100% { box-shadow: 0 0 0 5px rgba(124, 92, 255, .18); }
+      50%      { box-shadow: 0 0 0 9px rgba(124, 92, 255, .08); }
+    }
+
+    .elapsed {
+      display: inline-flex; align-items: center; gap: .4rem;
+      font-variant-numeric: tabular-nums;
+      color: var(--text-muted);
+      font-size: .88rem;
+      margin-top: .5rem;
+    }
+    .elapsed::before {
+      content: "⏱";
+      font-size: .95rem;
+    }
+
+    .meta { display: grid; gap: .5rem; margin: 1rem 0 .5rem; }
+    .meta-row { display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap; }
+    .meta-label {
+      font-size: .78rem; letter-spacing: .1em; text-transform: uppercase;
+      color: var(--text-muted); min-width: 90px;
+    }
+
+    .back-link {
+      display: inline-flex; align-items: center; gap: .3rem;
+      margin-top: 1.5rem;
+      color: var(--text-muted); text-decoration: none; font-size: .9rem;
+      transition: color .18s;
+    }
+    .back-link:hover { color: var(--accent-2); }
+
+    @media (max-width: 520px) {
+      main { margin: 1rem; padding: 1.5rem 1.25rem; border-radius: var(--radius); }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand">AUTO_CIFRA · Stem Remover</div>
+    {% if not job %}
+      <h1>Remove stems from a song</h1>
+      <p class="help">
+        Upload an MP3/WAV/M4A/FLAC/OGG, pick the instruments to remove, and
+        download the result as MP3. Everything runs locally — nothing leaves
+        your machine.
+      </p>
+      <p class="help">
+        Processing takes roughly <strong>4–6× realtime</strong> on CPU
+        (a 3-min song ≈ 12–18 min). You can close the browser and come back.
+      </p>
+      <form method="post" action="/stems" enctype="multipart/form-data">
+        <label class="file-field">
+          <span class="icon">♫</span>
+          <span class="title" id="file-title">Drop a track or click to browse</span>
+          <span class="sub">.mp3 · .wav · .m4a · .flac · .ogg — up to 60 MB</span>
+          <input type="file" name="file"
+                 accept=".mp3,.wav,.m4a,.flac,.ogg" required
+                 onchange="document.getElementById('file-title').textContent = this.files[0] ? this.files[0].name : 'Drop a track or click to browse'">
+        </label>
+        <fieldset>
+          <legend>Remove</legend>
+          <div class="chips">
+            {% for name in stems_all %}
+              <label class="chip">
+                <input type="checkbox" name="remove_{{ name }}" value="on"
+                  {% if name == "drums" %}checked{% endif %}>
+                <span class="dot"></span>{{ name }}
+              </label>
+            {% endfor %}
+          </div>
+        </fieldset>
+        <button class="btn" type="submit">Process track →</button>
+      </form>
+    {% else %}
+      <h1>Stem removal job</h1>
+      <div class="meta">
+        <div class="meta-row">
+          <span class="meta-label">File</span>
+          <code>{{ job.filename }}</code>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Removing</span>
+          <code>{{ job.remove_mask | join(", ") }}</code>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Job&nbsp;ID</span>
+          <code>{{ job.id }}</code>
+        </div>
+      </div>
+      <div class="state {{ job.stage }}" id="state">
+        <div>
+          <div>Stage: <span id="stage">{{ job.stage }}</span></div>
+          {% if job.error %}<small>{{ job.error }}</small>{% endif %}
+        </div>
+      </div>
+      <div class="progress">
+        <div class="bar" id="bar">
+          <div class="bar-fill" id="bar-fill"></div>
+        </div>
+        <div class="steps" id="steps">
+          <div class="step" data-step="upload">
+            <div class="step-dot">1</div>
+            <div class="step-label">Upload</div>
+          </div>
+          <div class="step" data-step="separate">
+            <div class="step-dot">2</div>
+            <div class="step-label">Separate</div>
+          </div>
+          <div class="step" data-step="encode">
+            <div class="step-dot">3</div>
+            <div class="step-label">Encode</div>
+          </div>
+          <div class="step" data-step="ready">
+            <div class="step-dot">4</div>
+            <div class="step-label">Ready</div>
+          </div>
+        </div>
+        <div class="elapsed" id="elapsed">elapsed 00:00</div>
+      </div>
+      <p id="actions">
+        {% if job.stage == "ready" %}
+          <a class="btn btn-success" href="/stems/{{ job.id }}/download">Download MP3</a>
+        {% endif %}
+      </p>
+      <a class="back-link" href="/stems">← Process another file</a>
+      <script>
+        (function () {
+          var jobId = {{ job.id | tojson }};
+          var createdTs = {{ job.created_ts | tojson }};
+          var stateEl = document.getElementById("state");
+          var stageEl = document.getElementById("stage");
+          var actionsEl = document.getElementById("actions");
+          var barEl = document.getElementById("bar");
+          var barFill = document.getElementById("bar-fill");
+          var stepsEl = document.getElementById("steps");
+          var elapsedEl = document.getElementById("elapsed");
+          var terminal = ["ready", "error", "cancelled"];
+
+          // Map each stage → percent target + active step index (0..3).
+          // Values are honest stepped estimates (Demucs has no progress callback).
+          var STAGE_MAP = {
+            uploaded:   { pct: 5,   step: 0 },
+            queued:     { pct: 10,  step: 0 },
+            separating: { pct: 60,  step: 1 },
+            encoding:   { pct: 90,  step: 2 },
+            ready:      { pct: 100, step: 3 },
+            error:      { pct: 100, step: -1 },
+            cancelled:  { pct: 100, step: -1 }
+          };
+
+          function pad(n) { return (n < 10 ? "0" : "") + n; }
+          function fmtElapsed(ms) {
+            var s = Math.max(0, Math.floor(ms / 1000));
+            var m = Math.floor(s / 60);
+            return pad(m) + ":" + pad(s % 60);
+          }
+
+          function paintStage(stage, progress) {
+            var info = STAGE_MAP[stage] || { pct: 0, step: 0 };
+            // Prefer server-reported progress when it's a sensible fraction.
+            var pct = info.pct;
+            if (typeof progress === "number" && progress > 0 && progress <= 1) {
+              pct = Math.max(pct, Math.round(progress * 100));
+            }
+            barFill.style.width = pct + "%";
+
+            // Bar state class for colour + shimmer.
+            barEl.classList.remove("active", "ready", "error");
+            if (stage === "ready") barEl.classList.add("ready");
+            else if (stage === "error" || stage === "cancelled") barEl.classList.add("error");
+            else barEl.classList.add("active");
+
+            // Steps state.
+            var stepNodes = stepsEl.querySelectorAll(".step");
+            stepNodes.forEach(function (node, idx) {
+              node.classList.remove("done", "active", "error");
+              if (stage === "error" || stage === "cancelled") {
+                // Mark error on the step where we got stuck; keep earlier steps done.
+                var stuck = Math.max(0, {
+                  uploaded: 0, queued: 0, separating: 1, encoding: 2, ready: 3
+                }[stage] || 0);
+                if (idx < stuck) node.classList.add("done");
+                else if (idx === stuck) node.classList.add("error");
+              } else {
+                if (idx < info.step) node.classList.add("done");
+                else if (idx === info.step) node.classList.add("active");
+              }
+            });
+          }
+
+          function renderDownload() {
+            actionsEl.innerHTML =
+              '<a class="btn btn-success" href="/stems/' +
+              encodeURIComponent(jobId) + '/download">Download MP3</a>';
+          }
+
+          // Elapsed timer — runs every second until terminal.
+          var elapsedTimer = null;
+          function startElapsed() {
+            if (elapsedTimer) return;
+            elapsedTimer = setInterval(function () {
+              elapsedEl.textContent =
+                "elapsed " + fmtElapsed(Date.now() - createdTs * 1000);
+            }, 1000);
+          }
+          function stopElapsed() {
+            if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+          }
+
+          // Paint initial state from server-rendered HTML.
+          paintStage({{ job.stage | tojson }}, {{ job.progress | tojson }});
+          elapsedEl.textContent =
+            "elapsed " + fmtElapsed(Date.now() - createdTs * 1000);
+          if (terminal.indexOf({{ job.stage | tojson }}) === -1) startElapsed();
+
+          async function tick() {
+            try {
+              var r = await fetch("/stems/" + encodeURIComponent(jobId), {
+                headers: {"Accept": "application/json"}
+              });
+              if (!r.ok) {
+                setTimeout(tick, 2500);
+                return;
+              }
+              var j = await r.json();
+              stageEl.textContent = j.stage;
+              paintStage(j.stage, j.progress);
+              stateEl.className = "state " + j.stage;
+              if (j.stage === "ready") { stopElapsed(); renderDownload(); return; }
+              if (j.stage === "error" || j.stage === "cancelled") {
+                stopElapsed();
+                actionsEl.textContent = "Error: " + (j.error || j.stage);
+                return;
+              }
+            } catch (e) {
+              // transient — keep polling
+            }
+            setTimeout(tick, 2500);
+          }
+
+          if (terminal.indexOf(stageEl.textContent.trim()) === -1) {
+            setTimeout(tick, 2500);
+          }
+        })();
+      </script>
+    {% endif %}
+  </main>
+</body>
+</html>

@@ -21,6 +21,10 @@ data/tmp/*
 data/jobs.sqlite
 data/jobs.sqlite-shm
 data/jobs.sqlite-wal
+data/stems_jobs.sqlite
+data/stems_jobs.sqlite-shm
+data/stems_jobs.sqlite-wal
+data/stems_cache/
 !data/input/.gitkeep
 !data/output/.gitkeep
 !data/tmp/.gitkeep

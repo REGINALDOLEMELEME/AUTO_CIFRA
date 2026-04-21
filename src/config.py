@@ -116,6 +116,15 @@ class _WorkerCfg(BaseModel):
     poll_interval_seconds: float = 1.0
 
 
+class _StemsCfg(BaseModel):
+    model: str = "htdemucs_ft"
+    mp3_bitrate: int = 320
+    cache_ttl_hours: int = 24
+    max_duration_sec: int = 1200       # 20 min
+    max_bytes: int = 62_914_560        # 60 MiB
+    janitor_interval_sec: int = 6 * 3600
+
+
 class _AppCfg(BaseModel):
     language: str = "pt"
 
@@ -136,6 +145,7 @@ class Settings(BaseModel):
     structure: _StructureCfg = Field(default_factory=_StructureCfg)
     docx: _DocxCfg = Field(default_factory=_DocxCfg)
     worker: _WorkerCfg = Field(default_factory=_WorkerCfg)
+    stems: _StemsCfg = Field(default_factory=_StemsCfg)
 
     def ensure_dirs(self) -> None:
         for p in (self.input_dir, self.output_dir, self.tmp_dir, self.models_dir):
@@ -196,6 +206,7 @@ def get_settings(config_path: Path | None = None) -> Settings:
         structure=_StructureCfg(**(raw.get("structure") or {})),
         docx=_DocxCfg(**(raw.get("docx") or {})),
         worker=_WorkerCfg(**(raw.get("worker") or {})),
+        stems=_StemsCfg(**(raw.get("stems") or {})),
     )
     settings.ensure_dirs()
     return settings
