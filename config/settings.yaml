@@ -27,6 +27,8 @@ alignment:
 chords:
   backend: chordino
   vocabulary: [maj, min, "5", "7", m7, maj7, m7b5, dim, sus4]
+  simplify_to_triads: true
+  refine_to_key: true
 
 structure:
   enabled: true

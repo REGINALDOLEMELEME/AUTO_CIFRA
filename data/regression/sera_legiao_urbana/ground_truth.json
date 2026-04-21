@@ -1,0 +1,113 @@
+{
+  "song": {
+    "title": "Será",
+    "artist": "Legião Urbana",
+    "composers": ["Renato Russo", "Dado Villa-Lobos", "Marcelo Bonfá"],
+    "key": "C",
+    "tuning": "E A D G B E",
+    "source": "Cifra Club PDF (Cifra Club - Legião Urbana - Será.pdf)"
+  },
+  "notes": {
+    "slash_chords_in_reference": ["G/B", "Gm/Bb"],
+    "pipeline_vocabulary_limitation": "AUTO_CIFRA config/settings.yaml chords.vocabulary = [maj, min, 5, 7, m7, maj7, m7b5, dim, sus4] — slash chords (G/B, Gm/Bb) cannot be expressed; expected to appear as G and Gm in pipeline output.",
+    "instrumental_bracket_notation": "The PDF writes (C F G) four times stacked — chart notation for 'play this pattern 4 times'. Chord-change detectors like Chordino emit one event per chord change, so the instrumental is counted here as a single C F G cycle (3 symbols), not 12 symbols × 4 repetitions. This yields a fair comparison against any pipeline that detects chord changes rather than enumerating bars."
+  },
+  "sections": [
+    {
+      "name": "Intro",
+      "chord_sequence": ["C", "G", "Am", "F", "C", "G", "Am", "F"],
+      "lines": []
+    },
+    {
+      "name": "Primeira Parte",
+      "chord_sequence": [
+        "C", "G", "Am", "F", "C",
+        "G", "Am", "F", "C",
+        "G", "Am", "F",
+        "Am", "Em", "F", "G"
+      ],
+      "lines": [
+        {"lyric": "Tire suas mãos de mim",                           "chords": ["C", "G", "Am"]},
+        {"lyric": "Eu não pertenço a você",                          "chords": ["F", "C"]},
+        {"lyric": "Não é me dominando assim",                        "chords": ["G", "Am"]},
+        {"lyric": "Que você vai me entender",                        "chords": ["F", "C"]},
+        {"lyric": "Eu posso estar sozinho",                          "chords": ["G"]},
+        {"lyric": "Mas, eu sei muito bem aonde estou",               "chords": ["Am", "F"]},
+        {"lyric": "Você pode até duvidar",                           "chords": ["Am", "Em"]},
+        {"lyric": "Acho que isso não é amor",                        "chords": ["F", "G"]}
+      ]
+    },
+    {
+      "name": "Instrumental 1",
+      "chord_sequence": ["C", "F", "G"],
+      "lines": []
+    },
+    {
+      "name": "Refrão",
+      "chord_sequence": ["G", "Dm", "G", "Dm", "G", "Dm", "G", "Dm", "Am", "F", "G"],
+      "lines": [
+        {"lyric": "Será só imaginação",                    "chords": ["G", "Dm"]},
+        {"lyric": "Será que nada vai acontecer",           "chords": ["G", "Dm"]},
+        {"lyric": "Será que é tudo isso em vão",           "chords": ["G", "Dm"]},
+        {"lyric": "Será que vamos conseguir vencer",       "chords": ["G", "Dm", "Am"]},
+        {"lyric": "Ô ô ô ô ô ô",                            "chords": ["F", "G"]}
+      ]
+    },
+    {
+      "name": "Instrumental 2",
+      "chord_sequence": ["C", "F", "G"],
+      "lines": []
+    },
+    {
+      "name": "Segunda Parte",
+      "chord_sequence": [
+        "C", "G", "Am", "F",
+        "C", "G", "Am", "F",
+        "C", "G", "Am", "F",
+        "Am", "Em", "F", "G"
+      ],
+      "lines": [
+        {"lyric": "Nos perderemos entre monstros",     "chords": ["C", "G"]},
+        {"lyric": "Da nossa própria criação",          "chords": ["Am", "F"]},
+        {"lyric": "Serão noites inteiras",             "chords": ["C", "G"]},
+        {"lyric": "Talvez por medo da escuridão",      "chords": ["Am", "F"]},
+        {"lyric": "Ficaremos acordados",               "chords": ["C", "G"]},
+        {"lyric": "Imaginando alguma solução",         "chords": ["Am", "F"]},
+        {"lyric": "Pra que esse nosso egoísmo",        "chords": ["Am", "Em"]},
+        {"lyric": "Não destrua nosso coração",         "chords": ["F", "G"]}
+      ]
+    },
+    {
+      "name": "Instrumental 3",
+      "chord_sequence": ["C", "F", "G"],
+      "lines": []
+    },
+    {
+      "name": "Refrão (2)",
+      "chord_sequence": ["G", "Dm", "G", "Dm", "G", "Dm", "G", "Dm", "Am", "F", "G"],
+      "lines": [
+        {"lyric": "Será só imaginação",                    "chords": ["G", "Dm"]},
+        {"lyric": "Será que nada vai acontecer",           "chords": ["G", "Dm"]},
+        {"lyric": "Será que é tudo isso em vão",           "chords": ["G", "Dm"]},
+        {"lyric": "Será que vamos conseguir vencer",       "chords": ["G", "Dm", "Am"]},
+        {"lyric": "Ô ô ô ô ô ô",                            "chords": ["F", "G"]}
+      ]
+    },
+    {
+      "name": "Terceira Parte",
+      "chord_sequence": ["C", "G/B", "Gm/Bb", "Dm", "C", "G/B", "Gm/Bb", "Dm"],
+      "lines": [
+        {"lyric": "Brigar pra quê, se é sem querer",   "chords": ["C", "G/B"]},
+        {"lyric": "Quem é que vai nos proteger",       "chords": ["Gm/Bb", "Dm"]},
+        {"lyric": "Será que vamos ter que responder",  "chords": ["C", "G/B"]},
+        {"lyric": "Pelos erros a mais",                "chords": ["Gm/Bb"]},
+        {"lyric": "Eu e você",                         "chords": ["Dm"]}
+      ]
+    },
+    {
+      "name": "Final",
+      "chord_sequence": ["G", "F", "G", "F", "G", "F"],
+      "lines": []
+    }
+  ]
+}

@@ -33,6 +33,16 @@ class _ChordsCfg(BaseModel):
     vocabulary: list[str] = Field(
         default_factory=lambda: ["maj", "min", "5", "7", "m7", "maj7", "m7b5", "dim", "sus4"]
     )
+    # When True, reduce Chordino's extended voicings (Cmaj7, Am7, Dm7, ...) to
+    # their triad (C, Am, Dm). Matches how Cifra-Club-style lead sheets notate
+    # chords; guitarists typically play these positions identically regardless
+    # of the 7th being sounded in the recording.
+    simplify_to_triads: bool = False
+    # When True, coerce bare major chords to the diatonic minor when they fall
+    # on ii/iii/vi of the detected major key (or ii°/iv/v of a minor key).
+    # Fixes Chordino's systematic major-bias on simplechord output — e.g.
+    # `A` in C major becomes `Am`. Leaves 7ths, dim, and slash chords alone.
+    refine_to_key: bool = False
 
 
 class _StructureCfg(BaseModel):

@@ -8,7 +8,13 @@ from .alignment import align_chords_by_word_time
 from .alignment_asr import align_words
 from .audio import normalize_audio
 from .beats import detect_beats_key
-from .chords import detect_chords, normalize_chord_vocabulary, smooth_to_beats, write_json
+from .chords import (
+    detect_chords,
+    normalize_chord_vocabulary,
+    refine_chords_to_key,
+    smooth_to_beats,
+    write_json,
+)
 from .config import Settings
 from .jobs import Job, JobRepo
 from .models import release_whisper, release_wav2vec
@@ -85,7 +91,12 @@ def run(job: Job, repo: JobRepo, settings: Settings) -> Path:
     repo.heartbeat(job.id)
     beats = detect_beats_key(input_audio)
     raw_chords = detect_chords(input_audio=input_audio, tmp_dir=job_tmp, key=beats.get("key", ""))
-    normalized_chords = normalize_chord_vocabulary(raw_chords)
+    normalized_chords = normalize_chord_vocabulary(
+        raw_chords,
+        simplify_to_triads=settings.chords.simplify_to_triads,
+    )
+    if settings.chords.refine_to_key and beats.get("key"):
+        normalized_chords = refine_chords_to_key(normalized_chords, beats["key"])
     smoothed = smooth_to_beats(normalized_chords, beats)
     write_json(smoothed, job_tmp / "chords.json")
     _write_json(beats, job_tmp / "beats.json")

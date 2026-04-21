@@ -26,8 +26,11 @@ data/jobs.sqlite-wal
 !data/tmp/.gitkeep
 
 # Regression benchmarks — user tracks are not committed, only the README
+# and the Será ground-truth set used as a CI gate.
 data/regression/*
 !data/regression/README.md
+!data/regression/sera_legiao_urbana/
+data/regression/sera_legiao_urbana/metrics*.json
 
 # ML model cache (multi-GB — never commit)
 models/
@@ -40,3 +43,4 @@ tools/
 
 # Local Claude Code permissions (personal, not shared)
 .claude/settings.local.json
+.claude/scheduled_tasks.lock

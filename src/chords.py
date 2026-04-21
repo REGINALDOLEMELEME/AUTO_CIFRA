@@ -77,7 +77,111 @@ def normalize_chord_label(label: str) -> tuple[str, bool]:
     return f"{root}{qual}", warn
 
 
-def normalize_chord_vocabulary(chords: dict[str, Any]) -> dict[str, Any]:
+def simplify_to_triad(label: str) -> str:
+    """Reduce a canonical chord label to its triad form.
+
+    Keeps root, the minor marker, diminished, and slash-bass. Drops maj7 / m7 /
+    7 / 6 / 5 / sus4 since those are voicing details that a guitarist reading a
+    Cifra-Club-style chart would play the same way as the plain triad.
+    """
+    if not label:
+        return ""
+    if "/" in label:
+        head, bass = label.split("/", 1)
+        head_t = simplify_to_triad(head)
+        return f"{head_t}/{bass}" if head_t else ""
+    parts = _split_root(label)
+    if not parts:
+        return label
+    root, tail = parts
+    if tail.startswith("dim"):
+        return f"{root}dim"
+    if tail.startswith("m7b5"):
+        return f"{root}m"
+    if tail.startswith("m") and not tail.startswith("maj"):
+        return f"{root}m"
+    return root
+
+
+# Scale-degree triad qualities for major / natural-minor keys. Used by
+# refine_chords_to_key() to coerce Chordino's major-biased "simplechord"
+# output to the diatonic minor when the root lands on ii/iii/vi (major key)
+# or similar (minor key). Heuristic only — it does not try to model secondary
+# dominants or borrowed chords.
+_SHARP_ROOTS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+_FLAT_TO_SHARP = {"Db": "C#", "Eb": "D#", "Gb": "F#", "Ab": "G#", "Bb": "A#"}
+_MAJOR_SCALE_QUALITIES = ["", "m", "m", "", "", "m", "dim"]  # I ii iii IV V vi vii°
+_MINOR_SCALE_QUALITIES = ["m", "dim", "", "m", "m", "", ""]  # i ii° III iv v VI VII
+
+
+def _norm_root(root: str) -> str:
+    r = (root[:1].upper() + root[1:]) if root else ""
+    return _FLAT_TO_SHARP.get(r, r)
+
+
+def _expected_quality_for_root(key: str, root: str) -> str | None:
+    """Return '', 'm', or 'dim' for the root's diatonic triad in `key`.
+    `key` is like 'C', 'Am', 'F#m'. Returns None if inputs can't be interpreted."""
+    key = (key or "").strip()
+    if not key:
+        return None
+    key_is_minor = key.endswith("m") and not key.endswith("dim")
+    key_root = _norm_root(key[:-1] if key_is_minor else key)
+    root_n = _norm_root(root)
+    if key_root not in _SHARP_ROOTS or root_n not in _SHARP_ROOTS:
+        return None
+    degree = (_SHARP_ROOTS.index(root_n) - _SHARP_ROOTS.index(key_root)) % 12
+    # Major scale degrees live at semitones {0,2,4,5,7,9,11}; minor at {0,2,3,5,7,8,10}
+    major_degrees = [0, 2, 4, 5, 7, 9, 11]
+    minor_degrees = [0, 2, 3, 5, 7, 8, 10]
+    degrees = minor_degrees if key_is_minor else major_degrees
+    if degree not in degrees:
+        return None
+    scale_index = degrees.index(degree)
+    qualities = _MINOR_SCALE_QUALITIES if key_is_minor else _MAJOR_SCALE_QUALITIES
+    return qualities[scale_index]
+
+
+def refine_chords_to_key(
+    chords: dict[str, Any], key: str
+) -> dict[str, Any]:
+    """Coerce bare major triads to their diatonic quality when they land on an
+    out-of-quality scale degree. Leaves already-qualified chords alone (7ths,
+    dim, slash chords, etc.) and only touches the head of slash labels."""
+    if not key:
+        return chords
+    segs = chords.get("segments") or []
+    refined: list[dict[str, Any]] = []
+    for seg in segs:
+        label = str(seg.get("chord") or "").strip()
+        if not label:
+            refined.append(seg)
+            continue
+        head, sep, bass = label.partition("/")
+        parts = _split_root(head)
+        if not parts:
+            refined.append(seg)
+            continue
+        root, tail = parts
+        if tail:
+            refined.append(seg)
+            continue
+        expected = _expected_quality_for_root(key, root)
+        if expected is None or expected == "":
+            refined.append(seg)
+            continue
+        new_head = f"{root}{expected}"
+        new_label = f"{new_head}{sep}{bass}" if sep else new_head
+        refined.append({**seg, "chord": new_label})
+    out = dict(chords)
+    out["segments"] = refined
+    return out
+
+
+def normalize_chord_vocabulary(
+    chords: dict[str, Any],
+    simplify_to_triads: bool = False,
+) -> dict[str, Any]:
     warnings_accum: list[str] = list(chords.get("warning", "") and [chords["warning"]] or [])
     seen_exotic: set[str] = set()
     new_segments: list[dict[str, Any]] = []
@@ -89,6 +193,10 @@ def normalize_chord_vocabulary(chords: dict[str, Any]) -> dict[str, Any]:
         if warn and raw_label not in seen_exotic:
             seen_exotic.add(raw_label)
             warnings_accum.append(f"chord simplified: {raw_label!r} -> {canon!r}")
+        if simplify_to_triads:
+            canon = simplify_to_triad(canon)
+            if not canon:
+                continue
         new_segments.append({**seg, "chord": canon})
     out = {**chords, "segments": new_segments}
     out["warning"] = " | ".join([w for w in warnings_accum if w])
@@ -353,6 +461,14 @@ def _python_chord_estimation(input_audio: Path, key: str = "") -> dict[str, Any]
 
 
 def _parse_chord_csv(csv_path: Path) -> list[dict[str, float | str]]:
+    """Parse sonic-annotator CSV output for Chordino simplechord.
+
+    With `--csv-basedir --csv-fill-ends --csv-end-times`, sonic-annotator 1.7
+    emits rows of `start,end,"chord"` (3 columns, no filename prefix).
+    Older sonic-annotator 1.6 emitted `filename,start,duration,"chord"` (4
+    columns). This parser handles both by detecting a trailing numeric in
+    column 1.
+    """
     items: list[dict[str, float | str]] = []
     with csv_path.open("r", encoding="utf-8", errors="ignore") as fh:
         reader = csv.reader(fh)
@@ -360,21 +476,28 @@ def _parse_chord_csv(csv_path: Path) -> list[dict[str, float | str]]:
             if len(row) < 3:
                 continue
             try:
-                start = float(row[1])
+                float(row[0])
+                offset = 0
             except ValueError:
+                offset = 1
+            try:
+                start = float(row[offset])
+                second = float(row[offset + 1])
+            except (ValueError, IndexError):
                 continue
-            chord = row[-1].strip()
+            chord = row[-1].strip().strip('"')
             if not chord:
                 continue
-            duration = 2.0
-            try:
-                duration = float(row[2])
-            except ValueError:
-                duration = 2.0
+            if second > start:
+                end = second
+            elif second >= 0.05:
+                end = start + second
+            else:
+                continue
             items.append(
                 {
                     "start": round(start, 3),
-                    "end": round(start + max(duration, 0.5), 3),
+                    "end": round(end, 3),
                     "chord": chord,
                 }
             )
@@ -398,11 +521,13 @@ def detect_chords(input_audio: Path, tmp_dir: Path, key: str = "") -> dict[str, 
         cmd = [
             sonic_exe,
             "-d",
-            "vamp:nnls-chroma:chordino:chord",
+            "vamp:nnls-chroma:chordino:simplechord",
             "-w",
             "csv",
             "--csv-force",
-            "-o",
+            "--csv-fill-ends",
+            "--csv-end-times",
+            "--csv-basedir",
             str(tmp_dir),
             str(input_audio),
         ]

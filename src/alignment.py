@@ -84,6 +84,43 @@ def _attach_section(
     return None
 
 
+def _chord_changes_in_window(
+    chord_segments: list[dict[str, Any]], t_start: float, t_end: float
+) -> list[str]:
+    """Ordered, deduped chord labels whose segments overlap [t_start, t_end)."""
+    if t_end <= t_start:
+        return []
+    out: list[str] = []
+    for seg in chord_segments:
+        s = float(seg.get("start", 0.0))
+        e = float(seg.get("end", s))
+        if e <= t_start or s >= t_end:
+            continue
+        label = str(seg.get("chord") or "").strip()
+        if not label:
+            continue
+        if not out or out[-1] != label:
+            out.append(label)
+    return out
+
+
+def _instrumental_line(
+    start: float,
+    end: float,
+    chord_labels: list[str],
+    section: str | None,
+) -> dict[str, Any]:
+    return {
+        "section": section,
+        "start": round(start, 3),
+        "end": round(end, 3),
+        "words": [],
+        "lyric_line": "",
+        "chord_line": " ".join(chord_labels),
+        "chords": chord_labels,
+    }
+
+
 def align_chords_by_word_time(
     transcription: dict[str, Any],
     chords: dict[str, Any],
@@ -93,12 +130,15 @@ def align_chords_by_word_time(
     Attach each chord change to the word whose interval contains the chord's start.
     - Word timestamps come from WhisperX (preferred) or Whisper's native word times.
     - Chord segments have already been vocabulary-normalized and beat-smoothed.
+    - Chord changes that fall in the gap between vocal lines (intros, solos,
+      instrumental breaks, outros) are emitted as chord-only "instrumental"
+      lines so musicians reading the sheet see the full chord progression.
     """
     sections = sections or []
     segments = transcription.get("segments", []) or []
     chord_segments = chords.get("segments", []) or []
 
-    lines: list[dict[str, Any]] = []
+    vocal_lines: list[dict[str, Any]] = []
     last_chord: str | None = None
     emitted_sections: set[str] = set()
 
@@ -123,19 +163,69 @@ def align_chords_by_word_time(
         # start but not emitted yet, surface it so musicians see the entry chord.
         if decorated_words and not decorated_words[0].get("chord"):
             running = _chord_at(chord_segments, line_start)
-            if running and running != _prev_emitted(lines):
+            if running and running != _prev_emitted(vocal_lines):
                 decorated_words[0]["chord"] = running
                 last_chord = running
 
-        section_label = _attach_section(line_start, line_end, sections)
-        show_section = None
-        if section_label and section_label not in emitted_sections:
-            show_section = section_label
-            emitted_sections.add(section_label)
+        vocal_lines.append(
+            {
+                "_line_start": line_start,
+                "_line_end": line_end,
+                "words": decorated_words,
+            }
+        )
 
+    if not vocal_lines and not chord_segments:
+        return {
+            "source_file": transcription.get("source_file", ""),
+            "transcription_mode": transcription.get("mode", "real"),
+            "chord_mode": chords.get("mode", "real"),
+            "warnings": [
+                w
+                for w in (transcription.get("warning", ""), chords.get("warning", ""))
+                if w
+            ],
+            "lines": [],
+        }
+
+    song_end = max(
+        (float(s.get("end", 0.0)) for s in chord_segments),
+        default=(vocal_lines[-1]["_line_end"] if vocal_lines else 0.0),
+    )
+
+    lines: list[dict[str, Any]] = []
+
+    def _emit_section_tag(start: float, end: float) -> str | None:
+        label = _attach_section(start, end, sections)
+        if label and label not in emitted_sections:
+            emitted_sections.add(label)
+            return label
+        return None
+
+    def _last_emitted_chord() -> str | None:
+        for line in reversed(lines):
+            chords_seq = line.get("chords") or []
+            if chords_seq:
+                return chords_seq[-1]
+        return None
+
+    prev_end = 0.0
+    for vl in vocal_lines:
+        line_start = vl["_line_start"]
+        line_end = vl["_line_end"]
+        gap_labels = _chord_changes_in_window(chord_segments, prev_end, line_start)
+        last_seen = _last_emitted_chord()
+        if gap_labels and gap_labels[0] == last_seen:
+            gap_labels = gap_labels[1:]
+        if gap_labels:
+            section_tag = _emit_section_tag(prev_end, line_start)
+            lines.append(_instrumental_line(prev_end, line_start, gap_labels, section_tag))
+
+        decorated_words = vl["words"]
+        section_tag = _emit_section_tag(line_start, line_end)
         lines.append(
             {
-                "section": show_section,
+                "section": section_tag,
                 "start": round(line_start, 3),
                 "end": round(line_end, 3),
                 "words": decorated_words,
@@ -144,6 +234,15 @@ def align_chords_by_word_time(
                 "chords": [w["chord"] for w in decorated_words if w.get("chord")],
             }
         )
+        prev_end = line_end
+
+    outro_labels = _chord_changes_in_window(chord_segments, prev_end, song_end)
+    last_seen = _last_emitted_chord()
+    if outro_labels and outro_labels[0] == last_seen:
+        outro_labels = outro_labels[1:]
+    if outro_labels:
+        section_tag = _emit_section_tag(prev_end, song_end)
+        lines.append(_instrumental_line(prev_end, song_end, outro_labels, section_tag))
 
     return {
         "source_file": transcription.get("source_file", ""),
