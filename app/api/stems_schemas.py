@@ -9,7 +9,11 @@ STEMS_ALL: tuple[str, ...] = (
     "drums", "bass", "vocals", "other", "guitar", "piano",
 )
 ALLOWED_EXTS: set[str] = {".mp3", ".wav", ".m4a", ".flac", ".ogg"}
-__all__ = ["STEMS_ALL", "ALLOWED_EXTS", "QUALITY_PRESETS", "StemsJobOut"]
+OUTPUT_FORMATS: tuple[str, ...] = ("flac", "wav", "mp3")
+__all__ = [
+    "STEMS_ALL", "ALLOWED_EXTS", "QUALITY_PRESETS", "OUTPUT_FORMATS",
+    "StemsJobOut",
+]
 
 
 class StemsJobOut(BaseModel):
@@ -20,6 +24,7 @@ class StemsJobOut(BaseModel):
     remove_mask: list[str]
     bitrate: int
     quality: str
+    output_format: str
     output_path: str | None = None
     error: str | None = None
     created_ts: float
@@ -35,6 +40,7 @@ class StemsJobOut(BaseModel):
             remove_mask=list(job.remove_mask),
             bitrate=job.bitrate,
             quality=getattr(job, "quality", "best"),
+            output_format=getattr(job, "output_format", "mp3"),
             output_path=job.output_path,
             error=job.error,
             created_ts=job.created_ts,

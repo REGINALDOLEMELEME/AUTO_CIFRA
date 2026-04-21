@@ -148,6 +148,7 @@ class _StemsCfg(BaseModel):
     # Use "htdemucs_ft" for the faster (but 4-stem only) fine-tuned model.
     model: str = "htdemucs_6s"
     mp3_bitrate: int = 320
+    output_format: str = "flac"
     cache_ttl_hours: int = 24
     max_duration_sec: int = 1200       # 20 min
     max_bytes: int = 62_914_560        # 60 MiB
@@ -161,6 +162,11 @@ class _StemsCfg(BaseModel):
     bass_boost_db: float = 4.0          # +dB at / below the corner freq
     bass_boost_freq_hz: float = 120.0   # shelf corner
     bass_boost_q: float = 0.707         # Butterworth-ish slope
+
+    # Subtract the removed stem estimate from the original mix instead of
+    # rebuilding the whole song from all remaining stems. Values below 1.0
+    # usually preserve transients and room sound better for drums.
+    removal_strength: float = 0.92
 
     # Separation quality preset — trades CPU time for audible fidelity.
     # `fast` (shifts=1 overlap=0.25)   — ~1.3× today's runtime

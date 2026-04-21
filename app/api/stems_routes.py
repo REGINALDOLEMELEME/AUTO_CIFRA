@@ -20,7 +20,13 @@ from fastapi.responses import (
 )
 from fastapi.templating import Jinja2Templates
 
-from app.api.stems_schemas import ALLOWED_EXTS, QUALITY_PRESETS, STEMS_ALL, StemsJobOut
+from app.api.stems_schemas import (
+    ALLOWED_EXTS,
+    OUTPUT_FORMATS,
+    QUALITY_PRESETS,
+    STEMS_ALL,
+    StemsJobOut,
+)
 from src.separation_stems import hash_file, probe_duration_sec
 from src.stems_jobs import StemsJobRepo
 
@@ -55,7 +61,9 @@ async def stems_form(request: Request):
             "job": None,
             "stems_all": STEMS_ALL,
             "quality_presets": QUALITY_PRESETS,
+            "output_formats": OUTPUT_FORMATS,
             "default_quality": default_quality,
+            "default_output_format": request.app.state.settings.stems.output_format,
         },
     )
 
@@ -71,6 +79,7 @@ async def stems_submit(
     remove_guitar: str | None = Form(None),
     remove_piano: str | None = Form(None),
     quality: str | None = Form(None),
+    output_format: str | None = Form(None),
 ):
     mask = tuple(
         sorted(
@@ -104,6 +113,17 @@ async def stems_submit(
             detail=(
                 f"Unknown quality '{resolved_quality}'. "
                 f"Must be one of: {', '.join(QUALITY_PRESETS)}."
+            ),
+        )
+    resolved_output_format = (
+        output_format or settings_stems.output_format
+    ).lower()
+    if resolved_output_format not in OUTPUT_FORMATS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Unknown output format '{resolved_output_format}'. "
+                f"Must be one of: {', '.join(OUTPUT_FORMATS)}."
             ),
         )
 
@@ -165,6 +185,7 @@ async def stems_submit(
             input_sha256=sha,
             bitrate=bitrate,
             quality=resolved_quality,
+            output_format=resolved_output_format,
         )
 
         # Move file into the job's final dir.
@@ -200,7 +221,9 @@ async def stems_status(request: Request, job_id: str):
             "job": job,
             "stems_all": STEMS_ALL,
             "quality_presets": QUALITY_PRESETS,
+            "output_formats": OUTPUT_FORMATS,
             "default_quality": request.app.state.settings.stems.quality,
+            "default_output_format": request.app.state.settings.stems.output_format,
         },
     )
 
@@ -220,6 +243,13 @@ async def stems_download(request: Request, job_id: str):
         raise HTTPException(
             status_code=410, detail="output expired — please resubmit"
         )
+    media_types = {
+        ".mp3": "audio/mpeg",
+        ".wav": "audio/wav",
+        ".flac": "audio/flac",
+    }
     return FileResponse(
-        str(path), media_type="audio/mpeg", filename=path.name
+        str(path),
+        media_type=media_types.get(path.suffix.lower(), "application/octet-stream"),
+        filename=path.name,
     )

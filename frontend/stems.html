@@ -491,7 +491,7 @@
       <h1>Remove stems from a song</h1>
       <p class="help">
         Upload an MP3/WAV/M4A/FLAC/OGG, pick the instruments to remove, and
-        download the result as MP3. Everything runs locally — nothing leaves
+        download the result as FLAC, WAV, or MP3. Everything runs locally — nothing leaves
         your machine.
       </p>
       <p class="help">
@@ -539,6 +539,18 @@
             {% endfor %}
           </div>
         </fieldset>
+        <fieldset>
+          <legend>Output format</legend>
+          <div class="chips">
+            {% for fmt in output_formats %}
+              <label class="chip">
+                <input type="radio" name="output_format" value="{{ fmt }}"
+                  {% if fmt == default_output_format %}checked{% endif %}>
+                <span class="dot"></span>{{ fmt | upper }}
+              </label>
+            {% endfor %}
+          </div>
+        </fieldset>
         <button class="btn" type="submit">Process track →</button>
       </form>
     {% else %}
@@ -555,6 +567,10 @@
         <div class="meta-row">
           <span class="meta-label">Quality</span>
           <code>{{ job.quality }}</code>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Format</span>
+          <code>{{ job.output_format | upper }}</code>
         </div>
         <div class="meta-row">
           <span class="meta-label">Job&nbsp;ID</span>
@@ -593,7 +609,7 @@
       </div>
       <p id="actions">
         {% if job.stage == "ready" %}
-          <a class="btn btn-success" href="/stems/{{ job.id }}/download">Download MP3</a>
+          <a class="btn btn-success" href="/stems/{{ job.id }}/download">Download audio</a>
         {% endif %}
       </p>
       <a class="back-link" href="/stems">← Process another file</a>
@@ -665,7 +681,7 @@
           function renderDownload() {
             actionsEl.innerHTML =
               '<a class="btn btn-success" href="/stems/' +
-              encodeURIComponent(jobId) + '/download">Download MP3</a>';
+              encodeURIComponent(jobId) + '/download">Download audio</a>';
           }
 
           // Elapsed timer — runs every second until terminal.

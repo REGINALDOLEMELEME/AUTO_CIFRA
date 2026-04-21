@@ -27,6 +27,7 @@ StemsStage = Literal[
 
 TERMINAL_STAGES: tuple[StemsStage, ...] = ("ready", "error", "cancelled")
 ACTIVE_STAGES: tuple[StemsStage, ...] = ("separating", "encoding")
+OutputFormat = Literal["mp3", "wav", "flac"]
 
 
 @dataclass
@@ -44,6 +45,7 @@ class StemsJob:
     updated_ts: float
     heartbeat_ts: float
     quality: str = "best"
+    output_format: str = "mp3"
 
 
 _SCHEMA = """
@@ -60,7 +62,8 @@ CREATE TABLE IF NOT EXISTS stems_jobs (
     created_ts REAL NOT NULL,
     updated_ts REAL NOT NULL,
     heartbeat_ts REAL NOT NULL,
-    quality TEXT NOT NULL DEFAULT 'best'
+    quality TEXT NOT NULL DEFAULT 'best',
+    output_format TEXT NOT NULL DEFAULT 'mp3'
 );
 CREATE INDEX IF NOT EXISTS idx_stems_stage ON stems_jobs(stage);
 CREATE INDEX IF NOT EXISTS idx_stems_updated ON stems_jobs(updated_ts DESC);
@@ -69,10 +72,12 @@ CREATE INDEX IF NOT EXISTS idx_stems_sha ON stems_jobs(input_sha256);
 
 
 def _ensure_quality_column(conn: sqlite3.Connection) -> None:
-    """Backfill the quality column on pre-existing DBs (SQLite ALTER is idempotent-safe via try/except)."""
+    """Backfill columns on pre-existing DBs."""
     cols = [row["name"] for row in conn.execute("PRAGMA table_info(stems_jobs)").fetchall()]
     if "quality" not in cols:
         conn.execute("ALTER TABLE stems_jobs ADD COLUMN quality TEXT NOT NULL DEFAULT 'best'")
+    if "output_format" not in cols:
+        conn.execute("ALTER TABLE stems_jobs ADD COLUMN output_format TEXT NOT NULL DEFAULT 'mp3'")
 
 
 def _row_to_job(row: sqlite3.Row) -> StemsJob:
@@ -91,6 +96,7 @@ def _row_to_job(row: sqlite3.Row) -> StemsJob:
         updated_ts=row["updated_ts"],
         heartbeat_ts=row["heartbeat_ts"],
         quality=row["quality"] if "quality" in keys else "best",
+        output_format=row["output_format"] if "output_format" in keys else "mp3",
     )
 
 
@@ -115,6 +121,7 @@ class StemsJobRepo:
         input_sha256: str,
         bitrate: int,
         quality: str = "best",
+        output_format: str = "mp3",
     ) -> StemsJob:
         now = time.time()
         job_id = uuid.uuid4().hex[:12]
@@ -123,8 +130,8 @@ class StemsJobRepo:
                 "INSERT INTO stems_jobs("
                 "id, filename, stage, progress, remove_mask, input_sha256, "
                 "bitrate, output_path, error, created_ts, updated_ts, "
-                "heartbeat_ts, quality"
-                ") VALUES (?, ?, 'uploaded', 0.0, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)",
+                "heartbeat_ts, quality, output_format"
+                ") VALUES (?, ?, 'uploaded', 0.0, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)",
                 (
                     job_id,
                     filename,
@@ -135,6 +142,7 @@ class StemsJobRepo:
                     now,
                     now,
                     quality,
+                    output_format,
                 ),
             )
         return self.get(job_id)  # type: ignore[return-value]

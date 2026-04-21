@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 import subprocess
 import tempfile
@@ -82,11 +83,16 @@ def quality_cache_subdir(model: str, shifts: int, overlap: float) -> str:
 
 
 def deterministic_output_path(
-    output_root: Path, job_id: str, input_name: str, remove: tuple[str, ...]
+    output_root: Path,
+    job_id: str,
+    input_name: str,
+    remove: tuple[str, ...],
+    output_format: str = "mp3",
 ) -> Path:
     slug = slugify_filename(Path(input_name).stem)
     removed = "-".join(sorted(remove)) or "none"
-    return output_root / job_id / f"{slug}.no-{removed}.mp3"
+    ext = output_format.lower().lstrip(".")
+    return output_root / job_id / f"{slug}.no-{removed}.{ext}"
 
 
 def low_shelf(
@@ -159,23 +165,102 @@ def remix(
     return mix.astype(np.float32)
 
 
+def _match_length(array: np.ndarray, samples: int) -> np.ndarray:
+    """Trim or zero-pad ``[channels, samples]`` audio to a target length."""
+    if array.shape[-1] == samples:
+        return array
+    if array.shape[-1] > samples:
+        return array[..., :samples]
+    pad = samples - array.shape[-1]
+    return np.pad(array, ((0, 0), (0, pad)), mode="constant")
+
+
+def _match_channels(array: np.ndarray, channels: int) -> np.ndarray:
+    if array.shape[0] == channels:
+        return array
+    if channels == 1:
+        return array.mean(axis=0, keepdims=True)
+    if array.shape[0] == 1:
+        return np.repeat(array, channels, axis=0)
+    return array[:channels]
+
+
+def _peak_limit(array: np.ndarray, headroom: float = 0.99) -> np.ndarray:
+    peak = float(np.max(np.abs(array))) if array.size else 0.0
+    if peak > headroom:
+        array = array * (headroom / peak)
+    return array.astype(np.float32, copy=False)
+
+
+def load_original_mix(
+    input_audio: Path,
+    sample_rate: int,
+    input_was_mono: bool,
+) -> np.ndarray:
+    """Decode the original mix as float32 at the Demucs stem sample rate.
+
+    Using ffmpeg keeps this helper independent from torchaudio in tests and
+    supports every upload format accepted by the API.
+    """
+    channels = 1 if input_was_mono else 2
+    proc = subprocess.run(
+        [
+            "ffmpeg", "-v", "error", "-i", str(input_audio),
+            "-ac", str(channels), "-ar", str(int(sample_rate)),
+            "-f", "f32le", "pipe:1",
+        ],
+        capture_output=True,
+        check=True,
+    )
+    data = np.frombuffer(proc.stdout, dtype=np.float32)
+    if data.size == 0:
+        raise StemRemoverError("Decoded audio is empty.")
+    frames = data.size // channels
+    data = data[:frames * channels]
+    return data.reshape(frames, channels).T.astype(np.float32, copy=False)
+
+
+def subtract_removed_stems(
+    original_mix: np.ndarray,
+    stems: dict[str, np.ndarray],
+    remove: set[str],
+    strength: float = 1.0,
+    headroom: float = 0.99,
+) -> np.ndarray:
+    """Remove stems by subtracting their estimate from the original mix.
+
+    This preserves the original mastering, ambience and stereo image better
+    than reconstructing the whole song from the predicted remaining stems.
+    """
+    removed = [stems[name] for name in remove if name in stems]
+    if not removed:
+        raise StemRemoverError("No known stems selected for removal.")
+    channels = original_mix.shape[0]
+    samples = original_mix.shape[-1]
+    aligned = [
+        _match_channels(_match_length(arr, samples), channels)
+        for arr in removed
+    ]
+    removed_sum = np.sum(np.stack(aligned, axis=0), axis=0)
+    mix = original_mix - removed_sum * float(strength)
+    return _peak_limit(mix, headroom=headroom)
+
+
 def encode_mp3(
     array: np.ndarray, sr: int, target: Path, bitrate: int = 320
 ) -> None:
     """Encode ``[channels, samples]`` float32 to MP3 CBR via pydub+ffmpeg."""
     from pydub import AudioSegment
 
-    import os as _os
-
     target.parent.mkdir(parents=True, exist_ok=True)
     # pydub wants a real file, not a buffer, for reliable cross-platform MP3
     # encoding via ffmpeg. Close the fd immediately — on Windows an open
     # handle blocks the final unlink.
     fd, tmp_name = tempfile.mkstemp(suffix=".wav")
-    _os.close(fd)
+    os.close(fd)
     tmp = Path(tmp_name)
     try:
-        sf.write(str(tmp), array.T, sr, subtype="PCM_16")
+        sf.write(str(tmp), array.T, sr, subtype="PCM_24")
         AudioSegment.from_wav(str(tmp)).export(
             str(target),
             format="mp3",
@@ -184,6 +269,27 @@ def encode_mp3(
         )
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def encode_audio(
+    array: np.ndarray,
+    sr: int,
+    target: Path,
+    output_format: str = "mp3",
+    bitrate: int = 320,
+) -> None:
+    fmt = output_format.lower()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if fmt == "mp3":
+        encode_mp3(array, sr=sr, target=target, bitrate=bitrate)
+        return
+    if fmt == "wav":
+        sf.write(str(target), array.T, sr, subtype="PCM_24")
+        return
+    if fmt == "flac":
+        sf.write(str(target), array.T, sr, format="FLAC", subtype="PCM_24")
+        return
+    raise StemRemoverError(f"Unsupported output format: {output_format}")
 
 
 # ---------------------------------------------------------------------------
@@ -241,8 +347,8 @@ def extract_all_stems(
     model_name: str = "htdemucs_ft",
     shifts: int = 1,
     overlap: float = 0.1,
-) -> dict[str, np.ndarray]:
-    """Return ``{name: [channels, samples] float32}`` for all stems.
+) -> tuple[dict[str, np.ndarray], int]:
+    """Return ``({name: [channels, samples] float32}, sample_rate)``.
 
     Reads from ``cache_dir/{name}.wav`` when all expected WAVs exist;
     otherwise runs Demucs with the given ``shifts``/``overlap`` and writes
@@ -255,11 +361,13 @@ def extract_all_stems(
 
     if all(p.exists() for p in wavs.values()):
         loaded: dict[str, np.ndarray] = {}
+        sample_rate = 0
         for n, p in wavs.items():
             data, _sr = sf.read(str(p), dtype="float32", always_2d=True)
+            sample_rate = sample_rate or int(_sr)
             # soundfile returns [samples, channels]; we want [channels, samples]
             loaded[n] = data.T.astype(np.float32, copy=False)
-        return loaded
+        return loaded, sample_rate
 
     model, err = get_demucs(model_name)
     if err or model is None:
@@ -313,7 +421,8 @@ def extract_all_stems(
         for name in STEM_NAMES:
             if name not in out:
                 out[name] = np.zeros_like(sources[0, 0].cpu().numpy())
-        return out
+                sf.write(str(wavs[name]), out[name].T, sr, subtype="FLOAT")
+        return out, int(sr)
     finally:
         release_demucs()
 
@@ -330,6 +439,10 @@ def process_job(
     stems_cfg = settings.stems
     input_path = settings.input_dir / "stems" / job.id / job.filename
     job_quality = getattr(job, "quality", None) or stems_cfg.quality
+    output_format = (
+        getattr(job, "output_format", None)
+        or getattr(stems_cfg, "output_format", "mp3")
+    ).lower()
     shifts, overlap = resolve_preset(
         job_quality, stems_cfg.shifts, stems_cfg.overlap
     )
@@ -340,7 +453,7 @@ def process_job(
     )
     output_root = settings.project_root / "data" / "output" / "stems"
     output_path = deterministic_output_path(
-        output_root, job.id, job.filename, job.remove_mask
+        output_root, job.id, job.filename, job.remove_mask, output_format
     )
 
     # Short-circuit: identical job already produced this output (AT-003).
@@ -350,27 +463,37 @@ def process_job(
         return
 
     repo.advance(job.id, "separating", progress=0.2)
-    stems = extract_all_stems(
+    extracted = extract_all_stems(
         input_path, cache_dir, stems_cfg.model, shifts=shifts, overlap=overlap
     )
+    if isinstance(extracted, tuple):
+        stems, stem_sr = extracted
+    else:
+        # Backward-compatible for tests/plugins monkeypatching older helpers.
+        stems = extracted
+        stem_sr = probe_sample_rate(input_path)
 
     repo.advance(job.id, "encoding", progress=0.8)
     channels = probe_channels(input_path)
-    sr = probe_sample_rate(input_path)
-
-    # Restore perceived "weight" on the bass stem — Demucs tends to
-    # under-represent sub-bass. Skipped when bass is being removed.
-    if "bass" in stems and "bass" not in set(job.remove_mask):
-        stems = dict(stems)
-        stems["bass"] = low_shelf(
-            stems["bass"], sr,
-            freq_hz=stems_cfg.bass_boost_freq_hz,
-            gain_db=stems_cfg.bass_boost_db,
-            q=stems_cfg.bass_boost_q,
-        )
-
-    mix = remix(stems, set(job.remove_mask), input_was_mono=channels == 1)
-    encode_mp3(mix, sr=sr, target=output_path, bitrate=job.bitrate)
+    original = load_original_mix(input_path, stem_sr, input_was_mono=channels == 1)
+    stem_samples = (
+        min(arr.shape[-1] for arr in stems.values())
+        if stems else original.shape[-1]
+    )
+    original = _match_length(original, stem_samples)
+    mix = subtract_removed_stems(
+        original,
+        stems,
+        set(job.remove_mask),
+        strength=getattr(stems_cfg, "removal_strength", 1.0),
+    )
+    encode_audio(
+        mix,
+        sr=stem_sr,
+        target=output_path,
+        output_format=output_format,
+        bitrate=job.bitrate,
+    )
 
     repo.set_output_path(job.id, str(output_path))
     repo.advance(job.id, "ready", progress=1.0)

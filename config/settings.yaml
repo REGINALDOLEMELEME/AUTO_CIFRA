@@ -19,6 +19,13 @@ separation:
   enabled: true
   model: htdemucs_ft
 
+stems:
+  model: htdemucs_6s
+  quality: best
+  output_format: flac
+  mp3_bitrate: 320
+  removal_strength: 0.92
+
 alignment:
   enabled: true
   # empty => whisperx picks its default wav2vec2 for the configured language

@@ -25,11 +25,13 @@ from src.separation_stems import (
     DemucsUnavailable,
     compute_cache_key,
     deterministic_output_path,
+    encode_audio,
     encode_mp3,
     hash_file,
     low_shelf,
     remix,
     slugify_filename,
+    subtract_removed_stems,
 )
 from src.stems_jobs import StemsJobRepo
 
@@ -256,6 +258,20 @@ def test_remix_all_removed_raises(synth_stems):
     assert "silence" in str(exc.value).lower()
 
 
+def test_subtract_removed_stems_preserves_original_mix():
+    original = np.array([[0.5, 0.25, -0.25], [0.4, 0.2, -0.2]], dtype=np.float32)
+    drums = np.array([[0.1, 0.05, -0.05], [0.1, 0.05, -0.05]], dtype=np.float32)
+    bass = np.array([[0.9, 0.9, 0.9], [0.9, 0.9, 0.9]], dtype=np.float32)
+    out = subtract_removed_stems(
+        original,
+        {"drums": drums, "bass": bass},
+        remove={"drums"},
+        strength=0.8,
+    )
+    expected = original - drums * 0.8
+    np.testing.assert_allclose(out, expected, rtol=1e-6, atol=1e-6)
+
+
 # ---------------------------------------------------------------------------
 # Unit: encode_mp3
 # ---------------------------------------------------------------------------
@@ -296,6 +312,28 @@ def test_encode_mp3_preserves_mono(tmp_path: Path):
         capture_output=True, text=True, check=True,
     )
     assert int(json.loads(probe.stdout)["streams"][0]["channels"]) == 1
+
+
+@need_ffmpeg
+def test_encode_audio_writes_lossless_formats(tmp_path: Path):
+    sr = 44100
+    t = np.linspace(0, 1.0, sr, endpoint=False, dtype=np.float32)
+    arr = np.stack([
+        (0.2 * np.sin(2 * np.pi * 440 * t)).astype(np.float32),
+        (0.2 * np.sin(2 * np.pi * 660 * t)).astype(np.float32),
+    ])
+    for fmt, codec in (("wav", "pcm_s24le"), ("flac", "flac")):
+        target = tmp_path / f"out.{fmt}"
+        encode_audio(arr, sr=sr, target=target, output_format=fmt)
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a:0",
+             "-show_entries", "stream=codec_name,sample_rate",
+             "-of", "json", str(target)],
+            capture_output=True, text=True, check=True,
+        )
+        info = json.loads(probe.stdout)["streams"][0]
+        assert info["codec_name"] == codec
+        assert int(info["sample_rate"]) == sr
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +435,78 @@ def test_process_job_happy_path(
     assert out_path.exists()
     assert out_path.stat().st_size > 1000
     assert counter["calls"] == 1
+
+
+@need_ffmpeg
+def test_process_job_uses_stem_sample_rate_for_output(
+    tmp_project: Path, monkeypatch
+):
+    from src.config import get_settings
+
+    settings = get_settings()
+    repo = StemsJobRepo(tmp_project / "data" / "stems_jobs.sqlite")
+    wav = tmp_project / "source_48k.wav"
+    _write_sine_wav(wav, dur_s=1.0, sr=48000, channels=2)
+    sha = hash_file(wav)
+    job = repo.create("source_48k.wav", ("drums",), sha, 320)
+    final_dir = settings.input_dir / "stems" / job.id
+    final_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy(wav, final_dir / "source_48k.wav")
+
+    stem_sr = 44100
+    zeros = {
+        name: np.zeros((2, stem_sr), dtype=np.float32)
+        for name in STEM_NAMES
+    }
+
+    def fake_extract(*args, **kwargs):
+        return zeros, stem_sr
+
+    monkeypatch.setattr(ss, "extract_all_stems", fake_extract)
+
+    from src.separation_stems import process_job as pj
+    pj(job, repo, settings)
+
+    out = Path(repo.get(job.id).output_path)
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a:0",
+         "-show_entries", "stream=sample_rate", "-of", "json", str(out)],
+        capture_output=True, text=True, check=True,
+    )
+    sample_rate = int(json.loads(probe.stdout)["streams"][0]["sample_rate"])
+    assert sample_rate == stem_sr
+
+
+@need_ffmpeg
+def test_process_job_can_write_flac(
+    tmp_project: Path, monkeypatch, synth_stems, small_stereo_mp3: Path
+):
+    from src.config import get_settings
+
+    settings = get_settings()
+    repo = StemsJobRepo(tmp_project / "data" / "stems_jobs.sqlite")
+    sha = hash_file(small_stereo_mp3)
+    job = repo.create(
+        "sine.mp3", ("drums",), sha, 320, output_format="flac"
+    )
+    final_dir = settings.input_dir / "stems" / job.id
+    final_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy(small_stereo_mp3, final_dir / "sine.mp3")
+
+    counter: dict = {}
+    _install_fake_stems(monkeypatch, counter, synth_stems)
+
+    from src.separation_stems import process_job as pj
+    pj(job, repo, settings)
+
+    out = Path(repo.get(job.id).output_path)
+    assert out.suffix == ".flac"
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a:0",
+         "-show_entries", "stream=codec_name", "-of", "json", str(out)],
+        capture_output=True, text=True, check=True,
+    )
+    assert json.loads(probe.stdout)["streams"][0]["codec_name"] == "flac"
 
 
 @need_ffmpeg
@@ -796,6 +906,25 @@ def test_quality_preset_roundtrips_to_job(client, tmp_path: Path):
     repo.close()
 
 
+def test_output_format_roundtrips_to_job(client, tmp_path: Path):
+    wav = tmp_path / "a.wav"
+    _write_sine_wav(wav, dur_s=0.5)
+    r = client.post(
+        "/stems",
+        files={"file": ("a.wav", wav.read_bytes(), "audio/wav")},
+        data={"remove_drums": "on", "output_format": "wav"},
+    )
+    assert r.status_code in (200, 303)
+    from src.stems_jobs import StemsJobRepo
+    from src.config import get_settings
+    settings = get_settings()
+    repo = StemsJobRepo(settings.project_root / "data" / "stems_jobs.sqlite")
+    recent = repo.list_recent(limit=5)
+    assert recent, "expected at least one job"
+    assert recent[0].output_format == "wav"
+    repo.close()
+
+
 def test_post_invalid_quality_rejected(client, tmp_path: Path):
     """POST /stems with an unknown quality → 422."""
     wav = tmp_path / "a.wav"
@@ -808,3 +937,15 @@ def test_post_invalid_quality_rejected(client, tmp_path: Path):
     assert r.status_code == 422
     assert "ultra_duper" in r.json()["detail"].lower() or \
            "unknown" in r.json()["detail"].lower()
+
+
+def test_post_invalid_output_format_rejected(client, tmp_path: Path):
+    wav = tmp_path / "a.wav"
+    _write_sine_wav(wav, dur_s=0.5)
+    r = client.post(
+        "/stems",
+        files={"file": ("a.wav", wav.read_bytes(), "audio/wav")},
+        data={"remove_drums": "on", "output_format": "aac"},
+    )
+    assert r.status_code == 422
+    assert "output format" in r.json()["detail"].lower()
