@@ -24,7 +24,7 @@ stems:
   quality: best
   output_format: flac
   mp3_bitrate: 320
-  removal_strength: 0.97
+  removal_strength: 1.0
   bass_boost_db: 5.0
   bass_boost_freq_hz: 120.0
 

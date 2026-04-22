@@ -184,18 +184,18 @@ def test_remix_drops_removed_stems(synth_stems):
 
 def test_remix_peak_normalises_instead_of_clipping():
     # 6 stems at 0.5 amplitude sum to 3.0; must be scaled down (not clipped)
-    # so peak ≈ 0.99 and dynamics are preserved (output shape still sinusoidal).
+    # so peak ≈ 0.95 (our new headroom) and dynamics are preserved.
     sr = 44100
     t = np.linspace(0, 0.1, int(sr * 0.1), endpoint=False, dtype=np.float32)
     x = np.sin(2 * np.pi * 440 * t).astype(np.float32)
     stems = {n: np.stack([0.5 * x] * 2) for n in STEM_NAMES}
-    mix = remix(stems, remove=set(), input_was_mono=False)
+    mix = remix(stems, remove=set(), input_was_mono=False, sample_rate=sr, headroom=0.95)
     peak = float(np.max(np.abs(mix)))
-    # Peak is close to headroom (0.99) — not hard-clipped at 1.0.
-    assert 0.98 <= peak <= 0.991
-    # Preserve waveform shape (scaled sine is still sinusoidal within tolerance).
+    # Peak is close to headroom (0.95).
+    assert 0.94 <= peak <= 0.96
+    # Preserve waveform shape.
     expected_peak = 3.0 * 0.5  # 6 stems × 0.5
-    expected_scale = 0.99 / expected_peak
+    expected_scale = 0.95 / expected_peak
     expected_peak_sample = expected_peak * expected_scale
     assert abs(peak - expected_peak_sample) < 0.005
 

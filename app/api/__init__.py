@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 from app.api.routes import router
 from app.api.stems_routes import router as stems_router
@@ -84,6 +85,7 @@ def create_app() -> FastAPI:
     # temp project directory see the right paths (cache is cleared by fixtures).
     settings = get_settings()
     app = FastAPI(title="AUTO_CIFRA", version="1.0.0", lifespan=lifespan)
+    app.state.templates = Jinja2Templates(directory=str(settings.frontend_dir))
     static_path = settings.frontend_dir / "static"
     static_path.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=str(static_path)), name="static")

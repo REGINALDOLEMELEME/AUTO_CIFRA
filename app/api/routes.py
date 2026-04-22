@@ -26,7 +26,7 @@ ALLOWED_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac", ".ogg"}
 
 
 def _templates(request: Request) -> Jinja2Templates:
-    return Jinja2Templates(directory=str(request.app.state.settings.frontend_dir))
+    return request.app.state.templates
 
 
 def _repo(request: Request) -> JobRepo:
@@ -155,8 +155,7 @@ async def review(job_id: str, request: Request):
     aligned = _read_aligned(request, job_id)
     templates = _templates(request)
     return templates.TemplateResponse(
-        "review.html",
-        {"request": request, "job": job, "aligned": aligned, "job_id": job_id},
+        "review.html", {"request": request, "job": job, "aligned": aligned, "job_id": job_id}
     )
 
 
@@ -213,5 +212,4 @@ async def export(job_id: str, request: Request, opts: ExportOptions | None = Non
 
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    templates = _templates(request)
-    return templates.TemplateResponse("index.html", {"request": request})
+    return _templates(request).TemplateResponse("index.html", {"request": request})

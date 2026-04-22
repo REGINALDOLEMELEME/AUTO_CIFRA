@@ -136,16 +136,14 @@ def remix(
     stems: dict[str, np.ndarray],
     remove: set[str],
     input_was_mono: bool,
-    headroom: float = 0.99,
+    sample_rate: int = 44100,
+    headroom: float = 0.95,
 ) -> np.ndarray:
-    """Sum kept stems, peak-normalise if they'd clip, optionally downmix to mono.
+    """Sum kept stems, peak-limit to prevent clipping, optionally downmix to mono.
 
     Summing stems from a mastered track routinely yields peaks > 1.0.
-    Hard-clipping at ±1.0 destroys transient info and sounds like digital
-    distortion (the classic "muddy bass / crunchy guitar" artefact).
-    Instead, if the summed peak exceeds ``headroom`` we scale the whole
-    mix down proportionally — dynamics are preserved, only the overall
-    level drops.
+    Instead of global scaling (which causes 'ducking'), we use a SoftLimiter
+    to squash only the offending peaks.
 
     Arrays are ``[channels, samples]`` float32. Returns same shape with
     ``channels=1`` when ``input_was_mono`` else 2.
@@ -156,9 +154,7 @@ def remix(
         raise StemRemoverError("All stems removed — refusing to output silence.")
     mix = np.sum(np.stack(kept, axis=0), axis=0)
 
-    peak = float(np.max(np.abs(mix)))
-    if peak > headroom:
-        mix = mix * (headroom / peak)
+    mix = _peak_limit(mix, sample_rate=sample_rate, headroom=headroom)
 
     if input_was_mono:
         mix = mix.mean(axis=0, keepdims=True)
@@ -185,11 +181,75 @@ def _match_channels(array: np.ndarray, channels: int) -> np.ndarray:
     return array[:channels]
 
 
-def _peak_limit(array: np.ndarray, headroom: float = 0.99) -> np.ndarray:
-    peak = float(np.max(np.abs(array))) if array.size else 0.0
-    if peak > headroom:
-        array = array * (headroom / peak)
-    return array.astype(np.float32, copy=False)
+class SoftLimiter:
+    """A look-ahead peak limiter to prevent digital clipping without 'ducking'.
+
+    Instead of scaling the whole song down when a drum transient peaks, this
+    squashes only the peaks that exceed the threshold, using a short attack/
+    release window to keep the rest of the mix at its original volume.
+    """
+
+    def __init__(
+        self,
+        sample_rate: int,
+        threshold: float = 0.95,
+        attack_ms: float = 2.0,
+        release_ms: float = 50.0,
+        lookahead_ms: float = 5.0,
+    ):
+        self.sr = sample_rate
+        self.threshold = threshold
+        self.attack_samples = int(attack_ms * sample_rate / 1000)
+        self.release_samples = int(release_ms * sample_rate / 1000)
+        self.lookahead_samples = int(lookahead_ms * sample_rate / 1000)
+
+    def limit(self, signal: np.ndarray) -> np.ndarray:
+        """Apply limiting to [channels, samples] float32 audio."""
+        if signal.size == 0:
+            return signal
+        # Use the max envelope across all channels for linked-stereo limiting.
+        envelope = np.max(np.abs(signal), axis=0)
+
+        # Calculate required gain reduction (0.0 to 1.0)
+        # target_gain = threshold / envelope where envelope > threshold
+        target_gain = np.ones_like(envelope)
+        mask = envelope > self.threshold
+        target_gain[mask] = self.threshold / envelope[mask]
+
+        # Smooth the gain reduction using a simple attack/release filter
+        # In a real-time limiter we'd use lookahead; here we can just use
+        # a rolling minimum / smoothed envelope.
+        smoothed_gain = np.ones_like(target_gain)
+        current_gain = 1.0
+
+        # We'll use a slightly simpler but effective offline approach:
+        # 1. Take the target gain
+        # 2. Apply a minimum-filter to account for lookahead
+        # 3. Smooth with attack/release logic
+        from scipy.ndimage import minimum_filter1d
+        smoothed_gain = minimum_filter1d(target_gain, size=self.lookahead_samples)
+
+        # Further smooth to avoid fast gain-change distortion (clicks)
+        # Simple IIR filter for release; attack is usually handled by the min-filter.
+        alpha_rel = math.exp(-1.0 / self.release_samples)
+        for i in range(1, len(smoothed_gain)):
+            # If we are releasing (gain increasing), use release constant
+            if smoothed_gain[i] > current_gain:
+                current_gain = current_gain * alpha_rel + smoothed_gain[i] * (1 - alpha_rel)
+                smoothed_gain[i] = current_gain
+            else:
+                # Attack is instant in this offline min-filter model
+                current_gain = smoothed_gain[i]
+
+        return (signal * smoothed_gain).astype(np.float32)
+
+
+def _peak_limit(
+    array: np.ndarray, sample_rate: int, headroom: float = 0.95
+) -> np.ndarray:
+    """Prevent clipping. Uses SoftLimiter to avoid ducking the whole mix."""
+    limiter = SoftLimiter(sample_rate=sample_rate, threshold=headroom)
+    return limiter.limit(array)
 
 
 def load_original_mix(
@@ -224,8 +284,9 @@ def subtract_removed_stems(
     original_mix: np.ndarray,
     stems: dict[str, np.ndarray],
     remove: set[str],
+    sample_rate: int = 44100,
     strength: float = 1.0,
-    headroom: float = 0.99,
+    headroom: float = 0.95,
 ) -> np.ndarray:
     """Remove stems by subtracting their estimate from the original mix.
 
@@ -243,7 +304,7 @@ def subtract_removed_stems(
     ]
     removed_sum = np.sum(np.stack(aligned, axis=0), axis=0)
     mix = original_mix - removed_sum * float(strength)
-    return _peak_limit(mix, headroom=headroom)
+    return _peak_limit(mix, sample_rate=sample_rate, headroom=headroom)
 
 
 def add_bass_lift(
@@ -253,7 +314,7 @@ def add_bass_lift(
     gain_db: float,
     freq_hz: float = 120.0,
     q: float = 0.707,
-    headroom: float = 0.99,
+    headroom: float = 0.95,
 ) -> np.ndarray:
     """Add only the boosted bass-stem delta to the mix.
 
@@ -270,7 +331,7 @@ def add_bass_lift(
         freq_hz=freq_hz,
         q=q,
     )
-    return _peak_limit(mix + (boosted - bass), headroom=headroom)
+    return _peak_limit(mix + (boosted - bass), sample_rate=sample_rate, headroom=headroom)
 
 
 def encode_mp3(
@@ -512,6 +573,7 @@ def process_job(
         original,
         stems,
         set(job.remove_mask),
+        sample_rate=stem_sr,
         strength=getattr(stems_cfg, "removal_strength", 1.0),
     )
     if "bass" in stems and "bass" not in set(job.remove_mask):

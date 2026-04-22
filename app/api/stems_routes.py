@@ -38,9 +38,7 @@ def _repo(request: Request) -> StemsJobRepo:
 
 
 def _templates(request: Request) -> Jinja2Templates:
-    return Jinja2Templates(
-        directory=str(request.app.state.settings.frontend_dir)
-    )
+    return request.app.state.templates
 
 
 def _max_bytes(request: Request) -> int:
