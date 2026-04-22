@@ -23,6 +23,7 @@ from src import separation_stems as ss
 from src.separation_stems import (
     STEM_NAMES,
     DemucsUnavailable,
+    add_bass_lift,
     compute_cache_key,
     deterministic_output_path,
     encode_audio,
@@ -270,6 +271,22 @@ def test_subtract_removed_stems_preserves_original_mix():
     )
     expected = original - drums * 0.8
     np.testing.assert_allclose(out, expected, rtol=1e-6, atol=1e-6)
+
+
+def test_add_bass_lift_boosts_bass_delta_only():
+    sr = 44100
+    t = np.linspace(0, 1.0, sr, endpoint=False, dtype=np.float32)
+    bass = np.stack([
+        (0.2 * np.sin(2 * np.pi * 60 * t)).astype(np.float32),
+        (0.2 * np.sin(2 * np.pi * 60 * t)).astype(np.float32),
+    ])
+    mix = bass.copy()
+
+    out = add_bass_lift(mix, bass, sample_rate=sr, gain_db=5.0)
+
+    assert out.shape == mix.shape
+    assert float(np.sqrt(np.mean(out ** 2))) > float(np.sqrt(np.mean(mix ** 2)))
+    assert float(np.max(np.abs(out))) <= 0.99
 
 
 # ---------------------------------------------------------------------------

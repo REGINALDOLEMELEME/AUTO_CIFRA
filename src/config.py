@@ -159,14 +159,14 @@ class _StemsCfg(BaseModel):
     # stem. A small low-shelf boost on the bass stem restores the
     # perceived "weight" without reintroducing the kick. Set
     # bass_boost_db to 0 to disable.
-    bass_boost_db: float = 4.0          # +dB at / below the corner freq
+    bass_boost_db: float = 5.0          # +dB at / below the corner freq
     bass_boost_freq_hz: float = 120.0   # shelf corner
     bass_boost_q: float = 0.707         # Butterworth-ish slope
 
     # Subtract the removed stem estimate from the original mix instead of
     # rebuilding the whole song from all remaining stems. Values below 1.0
     # usually preserve transients and room sound better for drums.
-    removal_strength: float = 0.92
+    removal_strength: float = 0.97
 
     # Separation quality preset — trades CPU time for audible fidelity.
     # `fast` (shifts=1 overlap=0.25)   — ~1.3× today's runtime

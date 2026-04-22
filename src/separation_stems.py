@@ -246,6 +246,33 @@ def subtract_removed_stems(
     return _peak_limit(mix, headroom=headroom)
 
 
+def add_bass_lift(
+    mix: np.ndarray,
+    bass_stem: np.ndarray,
+    sample_rate: int,
+    gain_db: float,
+    freq_hz: float = 120.0,
+    q: float = 0.707,
+    headroom: float = 0.99,
+) -> np.ndarray:
+    """Add only the boosted bass-stem delta to the mix.
+
+    This makes bass more audible without applying a blanket low-shelf EQ to
+    vocals, guitars, room tone, or residual kick.
+    """
+    if gain_db <= 0:
+        return mix.astype(np.float32, copy=False)
+    bass = _match_channels(_match_length(bass_stem, mix.shape[-1]), mix.shape[0])
+    boosted = low_shelf(
+        bass,
+        sample_rate,
+        gain_db=gain_db,
+        freq_hz=freq_hz,
+        q=q,
+    )
+    return _peak_limit(mix + (boosted - bass), headroom=headroom)
+
+
 def encode_mp3(
     array: np.ndarray, sr: int, target: Path, bitrate: int = 320
 ) -> None:
@@ -487,6 +514,15 @@ def process_job(
         set(job.remove_mask),
         strength=getattr(stems_cfg, "removal_strength", 1.0),
     )
+    if "bass" in stems and "bass" not in set(job.remove_mask):
+        mix = add_bass_lift(
+            mix,
+            stems["bass"],
+            stem_sr,
+            gain_db=getattr(stems_cfg, "bass_boost_db", 0.0),
+            freq_hz=getattr(stems_cfg, "bass_boost_freq_hz", 120.0),
+            q=getattr(stems_cfg, "bass_boost_q", 0.707),
+        )
     encode_audio(
         mix,
         sr=stem_sr,
