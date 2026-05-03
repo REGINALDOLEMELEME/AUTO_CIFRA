@@ -56,7 +56,6 @@ def _unique_chord_at_word(
     chord_at_start = _chord_at(chord_segments, start)
     if chord_at_start and chord_at_start != last_chord:
         return chord_at_start
-    # chord changed inside the word window -> still place at this word
     for seg in chord_segments:
         cs = float(seg.get("start", 0.0))
         if start <= cs < end:
@@ -67,8 +66,7 @@ def _unique_chord_at_word(
 
 
 def _chord_changes(chord_segments: list[dict[str, Any]]) -> list[tuple[float, str]]:
-    """Collapse a dense chord-segment list into (start_time, label) tuples
-    at each change point. Keeps absolute timestamps."""
+    """Collapse a dense chord-segment list into (start_time, label) tuples."""
     out: list[tuple[float, str]] = []
     for seg in chord_segments:
         label = str(seg.get("chord") or "").strip()
@@ -80,6 +78,28 @@ def _chord_changes(chord_segments: list[dict[str, Any]]) -> list[tuple[float, st
     return out
 
 
+def _word_attack_time(word: dict[str, Any]) -> float:
+    """Return a better visual anchor than the raw word start."""
+    start = float(word["start"])
+    end = float(word["end"])
+    dur = max(0.0, end - start)
+    return start + min(0.12, dur * 0.35)
+
+
+def _nearest_word_index(words: list[dict[str, Any]], t: float) -> int:
+    """Map a chord onset to the nearest word-attack slot on the line."""
+    if not words:
+        return -1
+    attacks = [_word_attack_time(w) for w in words]
+    if len(attacks) == 1:
+        return 0
+    for i in range(len(attacks) - 1):
+        boundary = (attacks[i] + attacks[i + 1]) / 2.0
+        if t < boundary:
+            return i
+    return len(attacks) - 1
+
+
 def _assign_chords_nearest_word(
     words: list[dict[str, Any]],
     chord_segments: list[dict[str, Any]],
@@ -88,51 +108,35 @@ def _assign_chords_nearest_word(
     last_chord: str | None,
     tolerance_s: float = 0.5,
 ) -> list[dict[str, Any]]:
-    """For each chord change that falls in or near this line's time window,
-    assign it to the word whose start timestamp is closest.
-
-    Rationale: the previous algorithm placed a chord on whichever word was
-    *playing* when the chord started. Because ASR word-onset timestamps and
-    Chordino segment boundaries each carry ~100-300 ms of independent jitter,
-    the chord routinely landed one word early or late. Nearest-start matching
-    with a tolerance window is more forgiving of that jitter and matches how
-    humans read chord sheets — the chord sits over the syllable it *starts*
-    on, not the syllable that happens to be sustaining when the chord arrives.
-    """
+    """Assign each chord change to the nearest word-attack anchor."""
     decorated = [{**w, "chord": None} for w in words]
     if not decorated:
         return decorated
 
-    # Chord changes whose onset falls in [line_start - tol, line_end + tol].
     changes = [
-        (t, c) for (t, c) in _chord_changes(chord_segments)
+        (t, c)
+        for (t, c) in _chord_changes(chord_segments)
         if line_start - tolerance_s <= t <= line_end + tolerance_s
     ]
     used_word_indices: set[int] = set()
     running = last_chord
+    last_assigned_idx = -1
     for t, c in changes:
         if c == running:
             continue
-        # Pick the closest word by start time that hasn't already been assigned.
-        best_idx = -1
-        best_dist = float("inf")
-        for i, w in enumerate(decorated):
-            if i in used_word_indices:
-                continue
-            dist = abs(float(w["start"]) - t)
-            if dist < best_dist:
-                best_dist = dist
-                best_idx = i
-        if best_idx < 0:
+        best_idx = _nearest_word_index(decorated, t)
+        candidate_idx = max(best_idx, last_assigned_idx + 1)
+        while candidate_idx < len(decorated) and candidate_idx in used_word_indices:
+            candidate_idx += 1
+        if candidate_idx >= len(decorated):
             break
-        # Only accept the match if it's within tolerance OR if the chord's
-        # onset is inside the word's span (word stretched past the chord's
-        # nominal onset).
-        w = decorated[best_idx]
+        w = decorated[candidate_idx]
+        dist = abs(_word_attack_time(w) - t)
         inside_word = float(w["start"]) <= t < float(w["end"])
-        if best_dist <= tolerance_s or inside_word:
-            decorated[best_idx]["chord"] = c
-            used_word_indices.add(best_idx)
+        if dist <= tolerance_s or inside_word or candidate_idx == 0:
+            decorated[candidate_idx]["chord"] = c
+            used_word_indices.add(candidate_idx)
+            last_assigned_idx = candidate_idx
             running = c
     return decorated
 
@@ -146,7 +150,6 @@ def _attach_section(
         if float(s.get("start", 0.0)) <= line_start < float(s.get("end", 0.0)):
             label = str(s.get("label") or "").strip()
             return label or None
-    # Fall back to whichever section overlaps the line center.
     mid = (line_start + line_end) / 2.0
     for s in sections:
         if float(s.get("start", 0.0)) <= mid < float(s.get("end", 0.0)):
@@ -201,9 +204,8 @@ def align_chords_by_word_time(
     Attach each chord change to the word whose interval contains the chord's start.
     - Word timestamps come from WhisperX (preferred) or Whisper's native word times.
     - Chord segments have already been vocabulary-normalized and beat-smoothed.
-    - Chord changes that fall in the gap between vocal lines (intros, solos,
-      instrumental breaks, outros) are emitted as chord-only "instrumental"
-      lines so musicians reading the sheet see the full chord progression.
+    - Chord changes that fall in the gap between vocal lines are emitted as
+      chord-only instrumental lines.
     """
     sections = sections or []
     segments = transcription.get("segments", []) or []
@@ -230,13 +232,10 @@ def align_chords_by_word_time(
             line_end=line_end,
             last_chord=last_chord,
         )
-        # Track the running chord for the next line: last chord *label* placed.
         for dw in decorated_words:
             if dw.get("chord"):
                 last_chord = dw["chord"]
 
-        # If the first word inherits a chord that was already playing at the line
-        # start but not emitted yet, surface it so musicians see the entry chord.
         if decorated_words and not decorated_words[0].get("chord"):
             running = _chord_at(chord_segments, line_start)
             if running and running != _prev_emitted(vocal_lines):
@@ -343,8 +342,7 @@ def _prev_emitted(lines: list[dict[str, Any]]) -> str | None:
 
 
 def _legacy_chord_line(words: list[dict[str, Any]]) -> str:
-    """Flat, space-separated list of chords for CLI/JSON consumers. The DOCX
-    exporter bypasses this and uses the per-word `words[].chord` directly."""
+    """Flat, space-separated list of chords for CLI/JSON consumers."""
     chords: list[str] = []
     for w in words:
         c = w.get("chord")

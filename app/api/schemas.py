@@ -48,6 +48,7 @@ class HistoryItem(BaseModel):
     stage: Stage
     updated_ts: float
     output_docx: str | None = None
+    output_pdf: str | None = None
 
 
 class HistoryResponse(BaseModel):
@@ -88,3 +89,4 @@ class ExportOptions(BaseModel):
     transpose_semitones: int | None = Field(default=None, ge=-11, le=11)
     capo_fret: int | None = Field(default=None, ge=0, le=11)
     prefer_flats: bool = True
+    format: Literal["docx", "pdf"] = "docx"

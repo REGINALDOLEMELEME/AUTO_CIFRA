@@ -80,6 +80,32 @@ def test_no_chord_duplicates_across_words():
     assert words[2]["chord"] is None
 
 
+def test_chord_lands_on_next_word_when_onset_is_near_word_attack():
+    transcription = {
+        "segments": [
+            {
+                "start": 0.0,
+                "end": 1.2,
+                "text": "eu amo",
+                "words": [
+                    {"word": "eu", "start": 0.00, "end": 0.28},
+                    {"word": "amo", "start": 0.33, "end": 0.95},
+                ],
+            }
+        ]
+    }
+    chords = {
+        "segments": [
+            {"start": 0.00, "end": 0.34, "chord": "C"},
+            {"start": 0.34, "end": 1.20, "chord": "G"},
+        ]
+    }
+    aligned = align_chords_by_word_time(transcription, chords)
+    words = aligned["lines"][0]["words"]
+    assert words[0]["chord"] == "C"
+    assert words[1]["chord"] == "G"
+
+
 def test_section_label_is_emitted_once_per_section():
     transcription = {
         "segments": [

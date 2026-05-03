@@ -561,6 +561,9 @@
           if (j.output_docx) {
             links.push(`<span class="muted">DOCX: ${j.output_docx.split(/[\\/]/).pop()}</span>`);
           }
+          if (j.output_pdf) {
+            links.push(`<span class="muted">PDF: ${j.output_pdf.split(/[\\/]/).pop()}</span>`);
+          }
           return `<div class="history-item ${cls}">
             <div class="history-main">
               <div class="history-name">${j.filename}</div>

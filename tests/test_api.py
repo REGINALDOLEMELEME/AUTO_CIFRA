@@ -95,6 +95,29 @@ def test_save_then_export_round_trip(client, sample_aligned, tmp_project: Path):
     assert int(exp.headers.get("content-length", "0")) > 1000  # DOCX is never empty
 
 
+def test_export_pdf_round_trip(client, sample_aligned, tmp_project: Path):
+    wav_bytes = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x40\x1f\x00\x00\x80>\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
+    up = client.post(
+        "/upload",
+        files={"file": ("song.wav", io.BytesIO(wav_bytes), "audio/wav")},
+    ).json()
+    job_id = up["job"]["id"]
+
+    res = client.post(
+        f"/save/{job_id}",
+        json={"aligned": sample_aligned, "transpose_semitones": 0, "capo_fret": 0},
+    )
+    assert res.status_code == 200
+
+    exp = client.post(
+        f"/export/{job_id}",
+        json={"transpose_semitones": 0, "capo_fret": 0, "prefer_flats": True, "format": "pdf"},
+    )
+    assert exp.status_code == 200
+    assert exp.headers["content-type"].startswith("application/pdf")
+    assert exp.content.startswith(b"%PDF-")
+
+
 def test_history_lists_created_jobs(client):
     wav_bytes = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x40\x1f\x00\x00\x80>\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
     client.post("/upload", files={"file": ("x.wav", io.BytesIO(wav_bytes), "audio/wav")})

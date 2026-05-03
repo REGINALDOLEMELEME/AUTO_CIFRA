@@ -31,6 +31,7 @@
       <button type="button" id="btn-reset" title="Restaurar saída original do pipeline">Reset</button>
       <button type="button" id="btn-save">Save</button>
       <button type="button" id="btn-export">Export DOCX</button>
+      <button type="button" id="btn-export-pdf">Export PDF</button>
       <a href="/" class="btn-link">Back</a>
     </form>
 
@@ -119,6 +120,27 @@
     };
   }
 
+  function syncTokenWidth(chordInp, wordInp) {
+    if (!chordInp || !wordInp) return;
+    const width = Math.max(2, chordInp.value.length, wordInp.value.length) + 1;
+    chordInp.style.width = `${width}ch`;
+    wordInp.style.width = `${width}ch`;
+    chordInp.setAttribute('size', width);
+    wordInp.setAttribute('size', width);
+  }
+
+  function syncLineWidths(lineEl) {
+    const chordInputs = lineEl.querySelectorAll('.chord');
+    const wordInputs = lineEl.querySelectorAll('.word');
+    for (let i = 0; i < Math.min(chordInputs.length, wordInputs.length); i += 1) {
+      syncTokenWidth(chordInputs[i], wordInputs[i]);
+    }
+  }
+
+  function syncAllWidths() {
+    document.querySelectorAll('#song .line').forEach(syncLineWidths);
+  }
+
   // ---------- Snapshot / undo / redo ----------
   // Snapshot = flat list of every chord and word input value, in DOM order.
   // That's enough to fully reconstruct edits (timestamps are not edited here).
@@ -132,6 +154,7 @@
       inputs[i].value = snap[i];
       inputs[i].setAttribute('size', Math.max(2, snap[i].length));
     }
+    syncAllWidths();
   }
   const undoStack = [];
   const redoStack = [];
@@ -157,6 +180,10 @@
   // history entry per discrete edit, not per keystroke.
   document.querySelectorAll('#song .chord, #song .word').forEach((inp) => {
     inp.addEventListener('change', pushHistory);
+    inp.addEventListener('input', () => {
+      const lineEl = inp.closest('.line');
+      if (lineEl) syncLineWidths(lineEl);
+    });
   });
 
   // ---------- Keyboard chord-move ----------
@@ -170,6 +197,8 @@
   // next syllable.
   function resize(inp) {
     inp.setAttribute('size', Math.max(2, inp.value.length));
+    const lineEl = inp.closest('.line');
+    if (lineEl) syncLineWidths(lineEl);
   }
   function swapChords(a, b) {
     const av = a.value;
@@ -246,6 +275,7 @@
       }
       cursor += count; // skip past the word-row slice we just wrote
     });
+    syncAllWidths();
   });
 
   // ---------- Audio click-to-seek ----------
@@ -282,12 +312,13 @@
     saveResult.textContent = res.ok ? 'saved ✓' : `error: ${JSON.stringify(json)}`;
   });
 
-  document.getElementById('btn-export').addEventListener('click', async () => {
-    saveResult.textContent = 'exporting…';
+  async function exportFile(format) {
+    saveResult.textContent = `exporting ${format}…`;
     const opts = {
       transpose_semitones: parseInt(document.getElementById('opt-transpose').value || '0', 10),
       capo_fret: parseInt(document.getElementById('opt-capo').value || '0', 10),
       prefer_flats: document.getElementById('opt-flats').checked,
+      format,
     };
     const res = await fetch(`/export/${jobId}`, {
       method: 'POST',
@@ -302,13 +333,18 @@
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${(initial.source_file || 'song').replace(/\.[^.]+$/, '')}.docx`;
+    a.download = `${(initial.source_file || 'song').replace(/\.[^.]+$/, '')}.${format}`;
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-    saveResult.textContent = 'exported ✓';
-  });
+    saveResult.textContent = `exported ${format} ✓`;
+  }
+
+  document.getElementById('btn-export').addEventListener('click', async () => exportFile('docx'));
+  document.getElementById('btn-export-pdf').addEventListener('click', async () => exportFile('pdf'));
+
+  syncAllWidths();
 })();
 </script>
 </body>

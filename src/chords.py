@@ -4,6 +4,7 @@ import csv
 import json
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -581,7 +582,10 @@ def detect_chords(input_audio: Path, tmp_dir: Path, key: str = "") -> dict[str, 
     local_sonic = (
         project_root / "tools" / "sonic-annotator" / "sonic-annotator-win64" / "sonic-annotator.exe"
     )
-    sonic_exe = str(local_sonic) if local_sonic.exists() else "sonic-annotator"
+    sonic_exe = str(local_sonic) if local_sonic.exists() else shutil.which("sonic-annotator")
+
+    if not sonic_exe:
+        return _python_chord_estimation(input_audio, key=key)
 
     env = os.environ.copy()
     local_vamp = project_root / "tools" / "vamp-plugins"

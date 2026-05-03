@@ -7,7 +7,7 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
-from src.docx_export import export_aligned_chord_docx
+from src.docx_export import export_aligned_chord_docx, export_aligned_chord_pdf
 from src.jobs import JobRepo
 from app.api.schemas import (
     AlignedDoc,
@@ -114,6 +114,7 @@ async def history(request: Request) -> HistoryResponse:
     items: list[HistoryItem] = []
     for j in jobs:
         docx = settings.output_dir / j.id / f"{Path(j.filename).stem}.docx"
+        pdf = settings.output_dir / j.id / f"{Path(j.filename).stem}.pdf"
         items.append(
             HistoryItem(
                 job_id=j.id,
@@ -121,6 +122,7 @@ async def history(request: Request) -> HistoryResponse:
                 stage=j.stage,
                 updated_ts=j.updated_ts,
                 output_docx=str(docx) if docx.exists() else None,
+                output_pdf=str(pdf) if pdf.exists() else None,
             )
         )
     return HistoryResponse(items=items)
@@ -189,24 +191,42 @@ async def export(job_id: str, request: Request, opts: ExportOptions | None = Non
 
     out_dir = settings.output_dir / job_id
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{Path(job.filename).stem}.docx"
-    export_aligned_chord_docx(
-        arrangement=aligned,
-        output_path=out_path,
-        title=Path(job.filename).stem,
-        transpose_semitones=transpose,
-        capo_fret=capo,
-        prefer_flats=opts.prefer_flats,
-        body_font=settings.docx.body_font,
-        chord_font=settings.docx.chord_font,
-        body_size_pt=settings.docx.body_size_pt,
-        chord_size_pt=settings.docx.chord_size_pt,
-    )
+    stem = Path(job.filename).stem
+    if opts.format == "pdf":
+        out_path = out_dir / f"{stem}.pdf"
+        export_aligned_chord_pdf(
+            arrangement=aligned,
+            output_path=out_path,
+            title=stem,
+            transpose_semitones=transpose,
+            capo_fret=capo,
+            prefer_flats=opts.prefer_flats,
+            body_font=settings.docx.body_font,
+            chord_font=settings.docx.chord_font,
+            body_size_pt=settings.docx.body_size_pt,
+            chord_size_pt=settings.docx.chord_size_pt,
+        )
+        media_type = "application/pdf"
+    else:
+        out_path = out_dir / f"{stem}.docx"
+        export_aligned_chord_docx(
+            arrangement=aligned,
+            output_path=out_path,
+            title=stem,
+            transpose_semitones=transpose,
+            capo_fret=capo,
+            prefer_flats=opts.prefer_flats,
+            body_font=settings.docx.body_font,
+            chord_font=settings.docx.chord_font,
+            body_size_pt=settings.docx.body_size_pt,
+            chord_size_pt=settings.docx.chord_size_pt,
+        )
+        media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     repo.advance(job_id, "exported", progress=1.0)
     return FileResponse(
         str(out_path),
         filename=out_path.name,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        media_type=media_type,
     )
 
 
