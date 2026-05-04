@@ -342,7 +342,7 @@ def _pdf_content_streams(rows: list[tuple[str, str]]) -> list[bytes]:
     current_page.append("ET")
     pages.append(current_page)
     return [
-        "\n".join(page).encode("latin-1", errors="replace")
+        "\n".join(page).encode("cp1252", errors="replace")
         for page in pages
     ]
 
@@ -400,9 +400,24 @@ def export_aligned_chord_pdf(
         )
         objects.append(_pdf_obj(stream_obj_id, stream_payload))
 
-    objects.append(_pdf_obj(font_obj_start, b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"))
-    objects.append(_pdf_obj(font_obj_start + 1, b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>"))
-    objects.append(_pdf_obj(font_obj_start + 2, b"<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>"))
+    objects.append(
+        _pdf_obj(
+            font_obj_start,
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+        )
+    )
+    objects.append(
+        _pdf_obj(
+            font_obj_start + 1,
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>",
+        )
+    )
+    objects.append(
+        _pdf_obj(
+            font_obj_start + 2,
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>",
+        )
+    )
 
     pdf = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
     offsets = [0]
