@@ -106,6 +106,59 @@ def test_chord_lands_on_next_word_when_onset_is_near_word_attack():
     assert words[1]["chord"] == "G"
 
 
+def test_chord_in_gap_before_next_word_attaches_to_next_word():
+    transcription = {
+        "segments": [
+            {
+                "start": 0.0,
+                "end": 2.0,
+                "text": "sobre nós",
+                "words": [
+                    {"word": "sobre", "start": 0.00, "end": 0.42},
+                    {"word": "nós", "start": 0.90, "end": 1.30},
+                ],
+            }
+        ]
+    }
+    chords = {
+        "segments": [
+            {"start": 0.00, "end": 0.70, "chord": "G"},
+            {"start": 0.70, "end": 2.00, "chord": "D"},
+        ]
+    }
+    aligned = align_chords_by_word_time(transcription, chords)
+    words = aligned["lines"][0]["words"]
+    assert words[0]["chord"] == "G"
+    assert words[1]["chord"] == "D"
+    assert words[1]["chord_time"] == 0.7
+
+
+def test_chord_early_in_gap_stays_on_previous_sustained_word():
+    transcription = {
+        "segments": [
+            {
+                "start": 0.0,
+                "end": 2.0,
+                "text": "venha senhor",
+                "words": [
+                    {"word": "venha", "start": 0.00, "end": 0.70},
+                    {"word": "senhor", "start": 1.20, "end": 1.80},
+                ],
+            }
+        ]
+    }
+    chords = {
+        "segments": [
+            {"start": 0.00, "end": 0.80, "chord": "C"},
+            {"start": 0.80, "end": 2.00, "chord": "F"},
+        ]
+    }
+    aligned = align_chords_by_word_time(transcription, chords)
+    words = aligned["lines"][0]["words"]
+    assert words[0]["chord"] == "C"
+    assert words[1]["chord"] is None
+
+
 def test_section_label_is_emitted_once_per_section():
     transcription = {
         "segments": [

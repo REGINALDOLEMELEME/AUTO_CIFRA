@@ -100,6 +100,45 @@ def _nearest_word_index(words: list[dict[str, Any]], t: float) -> int:
     return len(attacks) - 1
 
 
+def _musical_word_index(words: list[dict[str, Any]], t: float) -> int:
+    """Map a chord onset to the word where a musician expects to read it.
+
+    A chord that lands in the silence before the next lyric usually belongs
+    above that next word, not above the previous sustained word. This differs
+    from pure nearest-neighbor timing and produces cifra layouts closer to
+    hand-written charts.
+    """
+    if not words:
+        return -1
+    if len(words) == 1:
+        return 0
+
+    first_start = float(words[0]["start"])
+    if t <= first_start:
+        return 0
+
+    for i, word in enumerate(words):
+        start = float(word["start"])
+        end = float(word["end"])
+        if start <= t < end:
+            return i
+        if i + 1 >= len(words):
+            continue
+
+        next_start = float(words[i + 1]["start"])
+        if end <= t < next_start:
+            gap = max(0.0, next_start - end)
+            if gap <= 0.08:
+                return _nearest_word_index(words, t)
+            # Bias toward the next word once the chord is meaningfully inside
+            # the pre-word gap. This fixes the common "one word late/early"
+            # cifra problem without inventing extra visual columns.
+            handoff = end + gap * 0.35
+            return i + 1 if t >= handoff else i
+
+    return _nearest_word_index(words, t)
+
+
 def _assign_chords_nearest_word(
     words: list[dict[str, Any]],
     chord_segments: list[dict[str, Any]],
@@ -120,23 +159,20 @@ def _assign_chords_nearest_word(
     ]
     used_word_indices: set[int] = set()
     running = last_chord
-    last_assigned_idx = -1
     for t, c in changes:
         if c == running:
             continue
-        best_idx = _nearest_word_index(decorated, t)
-        candidate_idx = max(best_idx, last_assigned_idx + 1)
-        while candidate_idx < len(decorated) and candidate_idx in used_word_indices:
-            candidate_idx += 1
-        if candidate_idx >= len(decorated):
-            break
+        best_idx = _musical_word_index(decorated, t)
+        if best_idx < 0 or best_idx in used_word_indices:
+            continue
+        candidate_idx = best_idx
         w = decorated[candidate_idx]
         dist = abs(_word_attack_time(w) - t)
         inside_word = float(w["start"]) <= t < float(w["end"])
         if dist <= tolerance_s or inside_word or candidate_idx == 0:
             decorated[candidate_idx]["chord"] = c
+            decorated[candidate_idx]["chord_time"] = round(float(t), 3)
             used_word_indices.add(candidate_idx)
-            last_assigned_idx = candidate_idx
             running = c
     return decorated
 
@@ -240,6 +276,7 @@ def align_chords_by_word_time(
             running = _chord_at(chord_segments, line_start)
             if running and running != _prev_emitted(vocal_lines):
                 decorated_words[0]["chord"] = running
+                decorated_words[0]["chord_time"] = round(float(line_start), 3)
                 last_chord = running
 
         vocal_lines.append(
